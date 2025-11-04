@@ -5,6 +5,7 @@ A comprehensive collection of Bash scripts for managing Python development envir
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Example Workflows](#example-workflows)
 - [Script Overview](#script-overview)
 - [Environment Creation & Setup](#environment-creation--setup)
 - [Package Management](#package-management)
@@ -32,6 +33,64 @@ conda activate myproject
 ./safe_install.sh transformers torch-geometric --dry-run  # Preview first
 ./safe_install.sh transformers torch-geometric            # Actually install
 ```
+
+## Example Workflows
+
+**New to the toolkit?** Start with our complete workflow examples that show you how to chain scripts together for real-world scenarios.
+
+### 🎯 new-ml-project.sh
+
+Complete interactive workflow for setting up a new ML project from scratch.
+
+```bash
+./examples/new-ml-project.sh
+```
+
+**What it does:**
+1. ✅ Prompts for project name and template selection (PyTorch, TensorFlow, etc.)
+2. ✅ Creates optimized environment with proper CUDA versions
+3. ✅ Installs additional packages safely
+4. ✅ Exports specs for version control (environment.yml, requirements.txt)
+5. ✅ Registers Jupyter kernel automatically
+6. ✅ Runs health check and provides next steps
+
+**Perfect for:** Starting new research projects, setting up team environments, creating reproducible setups
+
+---
+
+### 🔧 fix-broken-env.sh
+
+Comprehensive diagnostic and repair workflow for troubleshooting environment issues.
+
+```bash
+# With active environment
+conda activate broken-env
+./examples/fix-broken-env.sh
+
+# Or specify environment
+./examples/fix-broken-env.sh broken-env
+```
+
+**What it does:**
+1. 🔍 Runs comprehensive health check to identify problems
+2. 🔍 Detects and fixes conda/pip package conflicts
+3. 🔍 Reviews environment history for rollback options
+4. 🔍 Offers export-and-clean for severe cases
+5. 🔍 Re-verifies health and provides detailed remediation steps
+
+**Perfect for:** Debugging import errors, fixing broken installations, resolving CUDA issues, recovering from bad updates
+
+---
+
+### Learn More
+
+See [examples/README.md](examples/README.md) for:
+- Detailed usage instructions
+- Example sessions with output
+- How to create your own workflows
+- Additional workflow ideas
+
+---
 
 ## Script Overview
 
