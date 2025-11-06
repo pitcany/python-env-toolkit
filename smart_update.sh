@@ -296,6 +296,113 @@ lower_risk() {
     esac
 }
 
+check_conda_dependencies() {
+    local package=$1
+    local new_version=$2
+    local env_name=$3
+
+    # Run conda install dry-run to see what would change
+    local dry_run_output
+    if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
+        dry_run_output=$(conda install --dry-run "${package}=${new_version}" 2>&1 || true)
+    else
+        dry_run_output=$(conda install -n "$env_name" --dry-run "${package}=${new_version}" 2>&1 || true)
+    fi
+
+    # Count how many packages would be affected
+    local affected_count=0
+    local affected_packages=()
+
+    # Parse output for UPDATED, DOWNGRADED, or new packages
+    while IFS= read -r line; do
+        if [[ $line =~ UPDATED|DOWNGRADED|installed ]]; then
+            # Extract package names (this is a simplified parser)
+            local pkg_name
+            pkg_name=$(echo "$line" | awk '{print $1}')
+            if [[ -n "$pkg_name" ]] && [[ "$pkg_name" != "$package" ]]; then
+                affected_packages+=("$pkg_name")
+                ((affected_count++))
+            fi
+        fi
+    done <<< "$dry_run_output"
+
+    echo "$affected_count|${affected_packages[*]}"
+}
+
+check_pip_dependencies() {
+    local package=$1
+    local new_version=$2
+    local env_name=$3
+
+    # For pip, we can use --dry-run (though it's less reliable)
+    local pip_cmd="pip"
+    local env_python=""
+
+    if [[ "$env_name" != "$CONDA_DEFAULT_ENV" ]]; then
+        local env_path
+        env_path=$(conda env list | grep "^${env_name} " | awk '{print $NF}')
+        if [[ -n "$env_path" ]]; then
+            env_python="${env_path}/bin/python"
+            pip_cmd="$env_python -m pip"
+        fi
+    fi
+
+    # Try to get dependency info (basic implementation)
+    local affected_count=0
+    local affected_packages=()
+
+    # Use pip show to get dependencies
+    local deps_output
+    deps_output=$(eval "$pip_cmd show $package 2>/dev/null" | grep "Requires:" || echo "")
+
+    if [[ -n "$deps_output" ]]; then
+        # Count dependencies
+        affected_count=$(echo "$deps_output" | tr ',' '\n' | grep -v "^$" | wc -l)
+    fi
+
+    echo "$affected_count|${affected_packages[*]}"
+}
+
+assess_package_risk() {
+    local pkg_manager=$1
+    local package=$2
+    local current_version=$3
+    local latest_version=$4
+    local env_name=$5
+
+    # Step 1: Base risk from version change
+    local version_change
+    version_change=$(compare_versions "$current_version" "$latest_version")
+    local risk
+    risk=$(calculate_base_risk "$version_change")
+    local risk_factors=("Version: $version_change")
+
+    # Step 2: Check dependency impact
+    local dep_info
+    if [[ "$pkg_manager" == "conda" ]]; then
+        dep_info=$(check_conda_dependencies "$package" "$latest_version" "$env_name")
+    else
+        dep_info=$(check_pip_dependencies "$package" "$latest_version" "$env_name")
+    fi
+
+    IFS='|' read -r dep_count dep_packages <<< "$dep_info"
+
+    if [[ $dep_count -gt 0 ]]; then
+        risk_factors+=("Dependencies: $dep_count affected")
+
+        if [[ $dep_count -ge 4 ]]; then
+            risk=$(elevate_risk "$risk" 2)
+        elif [[ $dep_count -ge 1 ]]; then
+            risk=$(elevate_risk "$risk" 1)
+        fi
+    fi
+
+    # Output: risk|version_change|dep_count|dep_packages|risk_factors
+    local risk_factors_str
+    risk_factors_str=$(IFS=';'; echo "${risk_factors[*]}")
+    echo "$risk|$version_change|$dep_count|$dep_packages|$risk_factors_str"
+}
+
 get_conda_updates() {
     local env_name=$1
 
@@ -430,11 +537,21 @@ main() {
     echo ""
     echo "📊 Found ${#updates[@]} package(s) with updates available"
 
-    # Display updates for testing
+    # Display updates for testing with risk assessment
     if [[ ${#updates[@]} -gt 0 ]]; then
         for update in "${updates[@]}"; do
             IFS='|' read -r pkg_manager package current latest <<< "$update"
-            echo "   [$pkg_manager] $package: $current → $latest"
+
+            # Assess risk for this package
+            local risk_assessment
+            risk_assessment=$(assess_package_risk "$pkg_manager" "$package" "$current" "$latest" "$ENV_NAME")
+            IFS='|' read -r risk version_change dep_count dep_packages risk_factors <<< "$risk_assessment"
+
+            echo "   [$pkg_manager] $package: $current → $latest [RISK: $risk]"
+            echo "      Risk factors: $(echo "$risk_factors" | sed 's/;/, /g')"
+            if [[ $dep_count -gt 0 ]]; then
+                echo "      Dependencies affected: $dep_count"
+            fi
         done
     else
         echo "   ✅ All packages are up to date!"
