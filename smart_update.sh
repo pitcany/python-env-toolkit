@@ -170,12 +170,84 @@ is_cache_valid() {
     return 1
 }
 
+get_conda_updates() {
+    local env_name=$1
+
+    echo "🔍 Checking conda packages..."
+
+    # Check if jq is installed
+    if ! command -v jq &> /dev/null; then
+        echo "⚠️  Warning: jq not installed, falling back to text parsing"
+        # Fallback: use conda list --outdated without JSON
+        if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
+            conda list --outdated 2>/dev/null || echo ""
+        else
+            conda list -n "$env_name" --outdated 2>/dev/null || echo ""
+        fi
+        return
+    fi
+
+    # Use JSON output for reliable parsing
+    local json_output
+    if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
+        json_output=$(conda list --json 2>/dev/null)
+    else
+        json_output=$(conda list -n "$env_name" --json 2>/dev/null)
+    fi
+
+    # Parse and check each package for updates
+    echo "$json_output" | jq -r '.[] | select(.channel != "pypi") | .name' | while read -r package; do
+        check_conda_package_update "$package" "$env_name"
+    done
+}
+
+check_conda_package_update() {
+    local package=$1
+    local env_name=$2
+
+    # Get current version
+    local current_version
+    if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
+        current_version=$(conda list "^${package}$" --json 2>/dev/null | jq -r '.[0].version')
+    else
+        current_version=$(conda list -n "$env_name" "^${package}$" --json 2>/dev/null | jq -r '.[0].version')
+    fi
+
+    # Search for latest version
+    local latest_version
+    latest_version=$(conda search "$package" --json 2>/dev/null | jq -r ".[\"$package\"][-1].version" 2>/dev/null)
+
+    if [[ -z "$latest_version" ]] || [[ "$latest_version" == "null" ]]; then
+        return  # No update available or package not found
+    fi
+
+    if [[ "$current_version" != "$latest_version" ]]; then
+        echo "conda|$package|$current_version|$latest_version"
+    fi
+}
+
 main() {
     parse_arguments "$@"
     detect_environment
     initialize_cache
 
-    echo "✅ Initialization complete"
+    local updates=()
+
+    # Collect conda updates
+    if [[ "$PIP_ONLY" != true ]]; then
+        while IFS='|' read -r pkg_manager package current latest; do
+            updates+=("$pkg_manager|$package|$current|$latest")
+        done < <(get_conda_updates "$ENV_NAME")
+    fi
+
+    echo ""
+    echo "📊 Found ${#updates[@]} conda package(s) with updates available"
+
+    # Display updates for testing
+    for update in "${updates[@]}"; do
+        IFS='|' read -r pkg_manager package current latest <<< "$update"
+        echo "   $package: $current → $latest"
+    done
 }
 
 # Run main
