@@ -363,6 +363,118 @@ check_pip_dependencies() {
     echo "$affected_count|${affected_packages[*]}"
 }
 
+query_pypi_api() {
+    local package=$1
+    local version=$2  # Optional, defaults to latest
+
+    # Use cache if available
+    local cache_file
+    cache_file=$(get_cache_file "$package" "pypi")
+
+    if is_cache_valid "$cache_file"; then
+        cat "$cache_file"
+        return 0
+    fi
+
+    # Query PyPI JSON API
+    local pypi_url="https://pypi.org/pypi/${package}/json"
+    local response
+
+    # Try to fetch with timeout
+    if command -v curl &> /dev/null; then
+        response=$(curl -s --max-time 5 "$pypi_url" 2>/dev/null || echo "")
+    elif command -v wget &> /dev/null; then
+        response=$(wget -qO- --timeout=5 "$pypi_url" 2>/dev/null || echo "")
+    else
+        echo "⚠️  Warning: Neither curl nor wget available for PyPI API" >&2
+        return 1
+    fi
+
+    if [[ -z "$response" ]] || [[ "$response" == *"404"* ]]; then
+        return 1
+    fi
+
+    # Cache the response
+    echo "$response" > "$cache_file"
+    echo "$response"
+    return 0
+}
+
+extract_release_info() {
+    local package=$1
+    local version=$2
+    local pypi_data=$3
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "no_security_info|unknown|"
+        return 0
+    fi
+
+    # Extract release-specific information
+    local has_security_fix=false
+    local release_type="unknown"
+    local classifiers=()
+
+    # Get classifiers for the package (not version-specific, but useful)
+    local classifiers_json
+    classifiers_json=$(echo "$pypi_data" | jq -r '.info.classifiers[]?' 2>/dev/null || echo "")
+
+    # Check for security-related classifiers
+    if echo "$classifiers_json" | grep -qi "security"; then
+        has_security_fix=true
+    fi
+
+    # Get release notes for the specific version
+    local release_data
+    release_data=$(echo "$pypi_data" | jq -r ".releases[\"$version\"]" 2>/dev/null || echo "")
+
+    # Check release description for security keywords
+    local description
+    description=$(echo "$pypi_data" | jq -r ".releases[\"$version\"][0].comment_text // .info.description // empty" 2>/dev/null || echo "")
+
+    if echo "$description" | grep -qiE "(security|vulnerability|CVE-|exploit|patch)"; then
+        has_security_fix=true
+        release_type="security"
+    elif echo "$description" | grep -qiE "(bug|fix|bugfix)"; then
+        release_type="bugfix"
+    elif echo "$description" | grep -qiE "(feature|enhancement|new)"; then
+        release_type="feature"
+    fi
+
+    # Get vulnerability warnings if available (some packages include this)
+    local has_vuln_warning=false
+    if echo "$pypi_data" | jq -e '.vulnerabilities' &>/dev/null; then
+        has_vuln_warning=true
+        has_security_fix=true
+        release_type="security"
+    fi
+
+    # Output format: has_security_fix|release_type|additional_info
+    if [[ "$has_security_fix" == true ]]; then
+        echo "true|$release_type|Security-related update detected"
+    else
+        echo "false|$release_type|No security indicators found"
+    fi
+}
+
+check_pypi_security() {
+    local package=$1
+    local new_version=$2
+
+    # Query PyPI API
+    local pypi_data
+    pypi_data=$(query_pypi_api "$package" "$new_version")
+
+    if [[ $? -ne 0 ]] || [[ -z "$pypi_data" ]]; then
+        echo "false|unknown|API unavailable"
+        return 0
+    fi
+
+    # Extract release information
+    extract_release_info "$package" "$new_version" "$pypi_data"
+}
+
 assess_package_risk() {
     local pkg_manager=$1
     local package=$2
@@ -397,10 +509,25 @@ assess_package_risk() {
         fi
     fi
 
-    # Output: risk|version_change|dep_count|dep_packages|risk_factors
+    # Step 3: Check for security fixes (pip packages only)
+    local security_info="false|unknown|"
+    if [[ "$pkg_manager" == "pip" ]]; then
+        security_info=$(check_pypi_security "$package" "$latest_version")
+        IFS='|' read -r has_security release_type security_msg <<< "$security_info"
+
+        if [[ "$has_security" == "true" ]]; then
+            risk_factors+=("Security: $release_type fix detected")
+            # Lower risk for security updates (encourages applying them)
+            risk=$(lower_risk "$risk")
+        elif [[ "$release_type" != "unknown" ]]; then
+            risk_factors+=("Release type: $release_type")
+        fi
+    fi
+
+    # Output: risk|version_change|dep_count|dep_packages|risk_factors|security_info
     local risk_factors_str
     risk_factors_str=$(IFS=';'; echo "${risk_factors[*]}")
-    echo "$risk|$version_change|$dep_count|$dep_packages|$risk_factors_str"
+    echo "$risk|$version_change|$dep_count|$dep_packages|$risk_factors_str|$security_info"
 }
 
 get_conda_updates() {
@@ -523,6 +650,10 @@ format_update_display() {
     local version_change=$7
     local dep_count=$8
     local risk_factors=$9
+    local security_info="${10:-false|unknown|}"
+
+    # Parse security info
+    IFS='|' read -r has_security release_type security_msg <<< "$security_info"
 
     case "$verbosity" in
         summary)
@@ -533,7 +664,11 @@ format_update_display() {
                 "$RISK_MEDIUM") risk_short="MED" ;;
                 "$RISK_HIGH") risk_short="HI " ;;
             esac
-            echo "📦 $package $current→$latest [$risk_short] ${version_change^}"
+            local sec_indicator=""
+            if [[ "$has_security" == "true" ]]; then
+                sec_indicator=" 🔒"
+            fi
+            echo "📦 $package $current→$latest [$risk_short] ${version_change^}${sec_indicator}"
             ;;
         verbose)
             # Detailed breakdown
@@ -544,6 +679,13 @@ format_update_display() {
             if [[ $dep_count -gt 0 ]]; then
                 echo "├─ Dependency impact: $dep_count packages affected"
             fi
+            if [[ "$pkg_manager" == "pip" ]]; then
+                if [[ "$has_security" == "true" ]]; then
+                    echo "├─ Security: 🔒 $release_type fix detected"
+                elif [[ "$release_type" != "unknown" ]]; then
+                    echo "├─ Release type: $release_type"
+                fi
+            fi
             echo "└─ Package manager: $pkg_manager"
             ;;
         *)
@@ -552,6 +694,9 @@ format_update_display() {
             local reason="${version_change^} version bump"
             if [[ $dep_count -gt 0 ]]; then
                 reason="$reason + $dep_count dependency changes"
+            fi
+            if [[ "$has_security" == "true" ]]; then
+                reason="$reason (🔒 security fix)"
             fi
             echo "   Reason: $reason"
             ;;
@@ -641,11 +786,11 @@ main() {
         # Assess risk for this package
         local risk_assessment
         risk_assessment=$(assess_package_risk "$pkg_manager" "$package" "$current" "$latest" "$ENV_NAME")
-        IFS='|' read -r risk version_change dep_count dep_packages risk_factors <<< "$risk_assessment"
+        IFS='|' read -r risk version_change dep_count dep_packages risk_factors security_info <<< "$risk_assessment"
 
         # Display update in current verbosity mode
         echo ""
-        format_update_display "$VERBOSITY" "$pkg_manager" "$package" "$current" "$latest" "$risk" "$version_change" "$dep_count" "$risk_factors"
+        format_update_display "$VERBOSITY" "$pkg_manager" "$package" "$current" "$latest" "$risk" "$version_change" "$dep_count" "$risk_factors" "$security_info"
 
         # Prompt for decision
         local decision
@@ -663,7 +808,7 @@ main() {
             details)
                 # Show verbose view, then prompt again
                 echo ""
-                format_update_display "verbose" "$pkg_manager" "$package" "$current" "$latest" "$risk" "$version_change" "$dep_count" "$risk_factors"
+                format_update_display "verbose" "$pkg_manager" "$package" "$current" "$latest" "$risk" "$version_change" "$dep_count" "$risk_factors" "$security_info"
                 decision=$(prompt_user_decision "$package" true)
 
                 if [[ "$decision" == "approve" ]]; then
