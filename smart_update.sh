@@ -144,11 +144,95 @@ parse_arguments() {
     done
 }
 
+check_internet_connectivity() {
+    echo "🌐 Checking internet connectivity..."
+
+    # Try multiple hosts for reliability
+    local hosts=("8.8.8.8" "1.1.1.1" "pypi.org")
+    local connected=false
+
+    for host in "${hosts[@]}"; do
+        if ping -c 1 -W 2 "$host" &>/dev/null 2>&1; then
+            connected=true
+            break
+        fi
+    done
+
+    if [[ "$connected" == false ]]; then
+        echo "⚠️  Warning: No internet connectivity detected"
+        echo "   - PyPI API queries will be unavailable"
+        echo "   - Security checks will be skipped"
+        echo "   - Updates will rely on local conda/pip caches only"
+        echo ""
+
+        if [[ "$NON_INTERACTIVE" != true ]]; then
+            read -p "Continue without internet? [y/N]: " -n 1 -r response
+            echo ""
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                exit 1
+            fi
+        fi
+
+        return 1
+    fi
+
+    echo "   ✅ Internet connection available"
+    return 0
+}
+
+check_required_tools() {
+    echo "🔧 Checking required tools..."
+    local missing_tools=()
+
+    # Check conda/mamba
+    if ! command -v conda &> /dev/null && ! command -v mamba &> /dev/null; then
+        echo "❌ Neither conda nor mamba found"
+        echo "   This script requires conda or mamba to be installed"
+        exit 1
+    fi
+    echo "   ✅ conda/mamba available"
+
+    # Check pip (warning only)
+    if ! command -v pip &> /dev/null; then
+        echo "   ⚠️  pip not found in PATH (pip updates will be skipped)"
+    else
+        echo "   ✅ pip available"
+    fi
+
+    # Check jq (warning only, will degrade gracefully)
+    if ! command -v jq &> /dev/null; then
+        echo "   ⚠️  jq not found (will use text parsing fallback)"
+        missing_tools+=("jq")
+    else
+        echo "   ✅ jq available"
+    fi
+
+    # Check curl or wget for PyPI API
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+        echo "   ⚠️  Neither curl nor wget found (PyPI API unavailable)"
+        missing_tools+=("curl/wget")
+    else
+        echo "   ✅ curl/wget available"
+    fi
+
+    # Display warnings for missing optional tools
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        echo ""
+        echo "⚠️  Missing optional tools: ${missing_tools[*]}"
+        echo "   Some features will be unavailable or use fallbacks"
+    fi
+
+    echo ""
+}
+
 detect_environment() {
     if [[ -n "$TARGET_ENV" ]]; then
         # Verify named environment exists
         if ! conda env list | grep -q "^${TARGET_ENV} "; then
             echo "❌ Environment '$TARGET_ENV' not found"
+            echo ""
+            echo "Available environments:"
+            conda env list | tail -n +3 | awk '{print "   - " $1}'
             exit 1
         fi
         ENV_NAME="$TARGET_ENV"
@@ -157,6 +241,9 @@ detect_environment() {
         if [[ -z "${CONDA_DEFAULT_ENV:-}" ]] || [[ "$CONDA_DEFAULT_ENV" == "base" ]]; then
             echo "❌ No conda environment active (or in base)"
             echo "   Activate an environment or use --name flag"
+            echo ""
+            echo "Available environments:"
+            conda env list | tail -n +3 | awk '{print "   - " $1}'
             exit 1
         fi
         ENV_NAME="$CONDA_DEFAULT_ENV"
@@ -175,8 +262,22 @@ initialize_cache() {
     fi
 
     if [[ ! -d "$CACHE_DIR" ]]; then
-        mkdir -p "$CACHE_DIR"
-        echo "📁 Created cache directory: $CACHE_DIR"
+        # Try to create cache directory with error handling
+        if ! mkdir -p "$CACHE_DIR" 2>/dev/null; then
+            echo "⚠️  Warning: Could not create cache directory at $CACHE_DIR"
+            echo "   Falling back to temporary location"
+            CACHE_DIR=$(mktemp -d)
+            echo "📁 Using temporary cache directory: $CACHE_DIR"
+        else
+            echo "📁 Created cache directory: $CACHE_DIR"
+        fi
+    fi
+
+    # Validate cache directory is writable
+    if [[ ! -w "$CACHE_DIR" ]]; then
+        echo "❌ Cache directory is not writable: $CACHE_DIR"
+        CACHE_DIR=$(mktemp -d)
+        echo "📁 Using temporary cache directory: $CACHE_DIR"
     fi
 }
 
@@ -191,6 +292,21 @@ is_cache_valid() {
 
     if [[ ! -f "$cache_file" ]]; then
         return 1
+    fi
+
+    # Check if cache file is readable
+    if [[ ! -r "$cache_file" ]]; then
+        echo "⚠️  Warning: Cache file not readable: $cache_file" >&2
+        return 1
+    fi
+
+    # Validate cache file is not corrupt (must be valid JSON for API caches)
+    if [[ "$cache_file" == *"pypi"* ]]; then
+        if ! grep -q "{" "$cache_file" 2>/dev/null; then
+            # Corrupt cache, delete it
+            rm -f "$cache_file" 2>/dev/null
+            return 1
+        fi
     fi
 
     # Use find for cross-platform compatibility
@@ -376,26 +492,53 @@ query_pypi_api() {
         return 0
     fi
 
+    # Check if we have the tools needed
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+        # Silently fail - we already warned about this in check_required_tools
+        return 1
+    fi
+
     # Query PyPI JSON API
     local pypi_url="https://pypi.org/pypi/${package}/json"
     local response
+    local fetch_failed=false
 
-    # Try to fetch with timeout
+    # Try to fetch with timeout - handle network failures gracefully
     if command -v curl &> /dev/null; then
-        response=$(curl -s -f --max-time 5 "$pypi_url" 2>/dev/null || echo "")
+        response=$(curl -s -f --max-time 5 --connect-timeout 3 "$pypi_url" 2>/dev/null || echo "")
+        if [[ -z "$response" ]]; then
+            fetch_failed=true
+        fi
     elif command -v wget &> /dev/null; then
-        response=$(wget -qO- --timeout=5 "$pypi_url" 2>/dev/null || echo "")
-    else
-        echo "⚠️  Warning: Neither curl nor wget available for PyPI API" >&2
+        response=$(wget -qO- --timeout=5 --tries=1 "$pypi_url" 2>/dev/null || echo "")
+        if [[ -z "$response" ]]; then
+            fetch_failed=true
+        fi
+    fi
+
+    # Handle network/API failures gracefully
+    if [[ "$fetch_failed" == true ]] || [[ -z "$response" ]]; then
+        # Don't spam warnings for every package - this is normal when offline
         return 1
     fi
 
-    if [[ -z "$response" ]] || [[ "$response" == *"404"* ]]; then
+    # Check for HTTP errors
+    if [[ "$response" == *"404"* ]] || [[ "$response" == *"error"* ]]; then
         return 1
     fi
 
-    # Cache the response
-    echo "$response" > "$cache_file"
+    # Validate response looks like JSON
+    if ! echo "$response" | grep -q "{"; then
+        return 1
+    fi
+
+    # Cache the response (handle write failures)
+    if ! echo "$response" > "$cache_file" 2>/dev/null; then
+        # Cache write failed, but we can still return the data
+        echo "$response"
+        return 0
+    fi
+
     echo "$response"
     return 0
 }
@@ -528,16 +671,22 @@ assess_package_risk() {
 get_conda_updates() {
     local env_name=$1
 
-    echo "🔍 Checking conda packages..."
+    echo "🔍 Checking conda packages..." >&2
 
     # Check if jq is installed
     if ! command -v jq &> /dev/null; then
-        echo "⚠️  Warning: jq not installed, falling back to text parsing"
+        echo "⚠️  Warning: jq not installed, falling back to text parsing" >&2
         local outdated_output
         if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
             outdated_output=$(conda list --outdated 2>/dev/null || echo "")
         else
             outdated_output=$(conda list -n "$env_name" --outdated 2>/dev/null || echo "")
+        fi
+
+        # Check if command failed
+        if [[ -z "$outdated_output" ]]; then
+            echo "⚠️  Warning: Could not list conda packages" >&2
+            return 1
         fi
 
         # Parse text format: skip header lines, format as "conda|package|current|latest"
@@ -553,9 +702,15 @@ get_conda_updates() {
         json_output=$(conda list -n "$env_name" --json 2>/dev/null)
     fi
 
+    # Validate JSON output
+    if [[ -z "$json_output" ]] || ! echo "$json_output" | jq empty 2>/dev/null; then
+        echo "⚠️  Warning: Could not retrieve conda package list" >&2
+        return 1
+    fi
+
     # Parse and check each package for updates
-    echo "$json_output" | jq -r '.[] | select(.channel != "pypi") | .name' | while read -r package; do
-        check_conda_package_update "$package" "$env_name"
+    echo "$json_output" | jq -r '.[] | select(.channel != "pypi") | .name' 2>/dev/null | while read -r package; do
+        [[ -n "$package" ]] && check_conda_package_update "$package" "$env_name"
     done
 }
 
@@ -571,25 +726,39 @@ check_conda_package_update() {
         return
     fi
 
-    # Get current version
+    # Skip empty package names
+    if [[ -z "$package" ]]; then
+        return
+    fi
+
+    # Get current version with error handling
     local current_version
     if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
-        current_version=$(conda list "^${package}$" --json 2>/dev/null | jq -r '.[0].version')
+        current_version=$(conda list "^${package}$" --json 2>/dev/null | jq -r '.[0].version' 2>/dev/null)
     else
-        current_version=$(conda list -n "$env_name" "^${package}$" --json 2>/dev/null | jq -r '.[0].version')
+        current_version=$(conda list -n "$env_name" "^${package}$" --json 2>/dev/null | jq -r '.[0].version' 2>/dev/null)
     fi
 
-    # Search for latest version
+    # Validate current version
+    if [[ -z "$current_version" ]] || [[ "$current_version" == "null" ]]; then
+        return  # Package not found in environment
+    fi
+
+    # Search for latest version with timeout and error handling
     local latest_version
-    latest_version=$(conda search "$package" --json 2>/dev/null | jq -r ".[\"$package\"][-1].version" 2>/dev/null)
+    latest_version=$(timeout 10 conda search "$package" --json 2>/dev/null | jq -r ".[\"$package\"][-1].version" 2>/dev/null)
 
-    if [[ -z "$latest_version" ]] || [[ "$latest_version" == "null" ]]; then
-        return  # No update available or package not found
+    # Handle search failures gracefully
+    if [[ $? -ne 0 ]] || [[ -z "$latest_version" ]] || [[ "$latest_version" == "null" ]]; then
+        # Search failed - could be network issue or package not in current channels
+        return
     fi
 
+    # Only report if versions differ
     if [[ "$current_version" != "$latest_version" ]]; then
         local result="conda|$package|$current_version|$latest_version"
-        echo "$result" | tee "$cache_file"
+        # Try to cache, but don't fail if we can't
+        echo "$result" | tee "$cache_file" 2>/dev/null || echo "$result"
     fi
 }
 
@@ -606,33 +775,39 @@ get_pip_updates() {
         env_path=$(conda env list | grep "^${env_name} " | awk '{print $NF}')
         if [[ -z "$env_path" ]]; then
             echo "⚠️  Warning: Could not find environment path for $env_name" >&2
-            return
+            return 1
         fi
         pip_cmd="${env_path}/bin/pip"
         if [[ ! -f "$pip_cmd" ]]; then
-            echo "⚠️  Warning: pip not found in environment $env_name" >&2
-            return
+            # pip not installed in this environment - this is normal
+            return 0
         fi
     fi
 
     # Check if pip is available
-    if ! command -v "$pip_cmd" &> /dev/null; then
-        echo "⚠️  Warning: pip not available in environment" >&2
-        return
+    if ! command -v "$pip_cmd" &> /dev/null && [[ ! -x "$pip_cmd" ]]; then
+        # pip not available - skip silently (already warned in pre-flight checks)
+        return 0
     fi
-
-    # Get outdated packages using pip list --outdated
-    local outdated_output
-    outdated_output=$($pip_cmd list --outdated --format=json 2>/dev/null || echo "[]")
 
     # Check if jq is available for JSON parsing
     if ! command -v jq &> /dev/null; then
-        echo "⚠️  Warning: jq not installed, skipping pip updates" >&2
-        return
+        # Already warned in pre-flight checks
+        return 0
     fi
 
-    # Parse JSON output
-    echo "$outdated_output" | jq -r '.[] | "pip|\(.name)|\(.version)|\(.latest_version)"'
+    # Get outdated packages using pip list --outdated with error handling
+    local outdated_output
+    outdated_output=$(timeout 30 "$pip_cmd" list --outdated --format=json 2>/dev/null || echo "[]")
+
+    # Validate JSON output
+    if [[ -z "$outdated_output" ]] || ! echo "$outdated_output" | jq empty 2>/dev/null; then
+        echo "⚠️  Warning: Could not retrieve pip package list" >&2
+        return 1
+    fi
+
+    # Parse JSON output with error handling
+    echo "$outdated_output" | jq -r '.[] | "pip|\(.name)|\(.version)|\(.latest_version)"' 2>/dev/null
 }
 
 format_update_display() {
@@ -774,29 +949,66 @@ execute_update() {
 
     echo "🔄 Installing $package $version via $pkg_manager..."
 
+    local exit_code=0
+    local error_msg=""
+
     if [[ "$use_safe_install" == true ]] && [[ -n "$SAFE_INSTALL_PATH" ]]; then
         # Use safe_install.sh for automatic rollback capability
         if [[ "$pkg_manager" == "conda" ]]; then
-            "$SAFE_INSTALL_PATH" "${package}=${version}" --yes
+            if ! "$SAFE_INSTALL_PATH" "${package}=${version}" --yes 2>&1; then
+                exit_code=$?
+                error_msg="safe_install.sh failed"
+            fi
         else
-            "$SAFE_INSTALL_PATH" --pip "${package}==${version}" --yes
+            if ! "$SAFE_INSTALL_PATH" --pip "${package}==${version}" --yes 2>&1; then
+                exit_code=$?
+                error_msg="safe_install.sh failed"
+            fi
         fi
     else
         # Direct installation without safe_install.sh
+        local install_output
         if [[ "$pkg_manager" == "conda" ]]; then
-            conda install -y "${package}=${version}"
+            install_output=$(conda install -y "${package}=${version}" 2>&1)
+            exit_code=$?
+            if [[ $exit_code -ne 0 ]]; then
+                # Check for common error patterns
+                if echo "$install_output" | grep -qi "PackagesNotFoundError\|ResolvePackageNotFound"; then
+                    error_msg="Package version not found in channels"
+                elif echo "$install_output" | grep -qi "conflict\|incompatible"; then
+                    error_msg="Dependency conflict detected"
+                elif echo "$install_output" | grep -qi "network\|connection\|timeout"; then
+                    error_msg="Network error"
+                else
+                    error_msg="Installation failed"
+                fi
+            fi
         else
-            pip install "${package}==${version}"
+            install_output=$(pip install "${package}==${version}" 2>&1)
+            exit_code=$?
+            if [[ $exit_code -ne 0 ]]; then
+                # Check for common pip error patterns
+                if echo "$install_output" | grep -qi "No matching distribution\|could not find"; then
+                    error_msg="Package version not found on PyPI"
+                elif echo "$install_output" | grep -qi "conflict\|incompatible"; then
+                    error_msg="Dependency conflict detected"
+                elif echo "$install_output" | grep -qi "network\|connection\|timeout"; then
+                    error_msg="Network error"
+                else
+                    error_msg="Installation failed"
+                fi
+            fi
         fi
     fi
-
-    local exit_code=$?
 
     if [[ $exit_code -eq 0 ]]; then
         echo "✅ Successfully installed $package $version"
         return 0
     else
         echo "❌ Failed to install $package $version"
+        if [[ -n "$error_msg" ]]; then
+            echo "   Reason: $error_msg"
+        fi
         return 1
     fi
 }
@@ -808,6 +1020,7 @@ execute_approved_updates() {
     local total=${#approved_refs[@]}
     local succeeded=0
     local failed=0
+    local failed_packages=()
 
     echo ""
     echo "═══════════════════════════════════════════════"
@@ -821,6 +1034,7 @@ execute_approved_updates() {
             ((succeeded++))
         else
             ((failed++))
+            failed_packages+=("$package ($current → $latest)")
 
             # Ask if user wants to continue after failure
             if [[ "$NON_INTERACTIVE" != true ]]; then
@@ -828,6 +1042,10 @@ execute_approved_updates() {
                 read -p "Continue with remaining updates? [Y/n]: " -n 1 -r response
                 echo ""
                 if [[ "$response" =~ ^[Nn]$ ]]; then
+                    # Calculate skipped count
+                    local skipped=$((total - succeeded - failed))
+                    echo ""
+                    echo "⏭️  Skipped remaining $skipped update(s)"
                     break
                 fi
             fi
@@ -839,49 +1057,100 @@ execute_approved_updates() {
     echo "Update Summary:"
     echo "  ✅ Succeeded: $succeeded"
     echo "  ❌ Failed: $failed"
-    echo "  📊 Total: $total"
+    echo "  📊 Total attempted: $total"
+
+    # Show failed packages if any
+    if [[ $failed -gt 0 ]]; then
+        echo ""
+        echo "Failed updates:"
+        for pkg in "${failed_packages[@]}"; do
+            echo "  - $pkg"
+        done
+    fi
+
     echo "═══════════════════════════════════════════════"
+
+    # Return failure status if any updates failed
+    [[ $failed -eq 0 ]]
 }
 
 main() {
     parse_arguments "$@"
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🚀 Smart Update - Intelligent Package Updater"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    # Pre-flight checks
+    check_required_tools
+    local has_internet=true
+    check_internet_connectivity || has_internet=false
+    echo ""
+
     detect_environment
     initialize_cache
 
     # Check for safe_install.sh
     local use_safe_install=true
     SAFE_INSTALL_PATH=$(verify_safe_install_available) || use_safe_install=false
+    echo ""
 
     # Optional: Check for duplicates first
     if [[ "$CHECK_DUPLICATES" == true ]] && [[ -f "./find_duplicates.sh" ]]; then
         echo "🔍 Checking for conda/pip duplicates..."
         ./find_duplicates.sh
         echo ""
-        read -p "Continue with updates? [Y/n]: " -n 1 -r response
-        echo ""
-        if [[ "$response" =~ ^[Nn]$ ]]; then
-            exit 0
+        if [[ "$NON_INTERACTIVE" != true ]]; then
+            read -p "Continue with updates? [Y/n]: " -n 1 -r response
+            echo ""
+            if [[ "$response" =~ ^[Nn]$ ]]; then
+                exit 0
+            fi
         fi
     fi
 
     # Collect available updates
     local updates=()
+    local conda_failed=false
+    local pip_failed=false
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📦 Scanning for available updates..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
 
     if [[ "$PIP_ONLY" != true ]]; then
-        while IFS='|' read -r pkg_manager package current latest; do
+        if ! while IFS='|' read -r pkg_manager package current latest; do
             [[ -n "$package" ]] && updates+=("$pkg_manager|$package|$current|$latest")
-        done < <(get_conda_updates "$ENV_NAME")
+        done < <(get_conda_updates "$ENV_NAME"); then
+            conda_failed=true
+            echo "⚠️  Warning: Failed to retrieve all conda updates" >&2
+        fi
     fi
 
     if [[ "$CONDA_ONLY" != true ]]; then
-        while IFS='|' read -r pkg_manager package current latest; do
+        if ! while IFS='|' read -r pkg_manager package current latest; do
             [[ -n "$package" ]] && updates+=("$pkg_manager|$package|$current|$latest")
-        done < <(get_pip_updates "$ENV_NAME")
+        done < <(get_pip_updates "$ENV_NAME"); then
+            pip_failed=true
+            echo "⚠️  Warning: Failed to retrieve all pip updates" >&2
+        fi
     fi
 
     # Check if any updates available
     if [[ ${#updates[@]} -eq 0 ]]; then
         echo "✅ All packages are up to date!"
+
+        # Show warnings if scans failed
+        if [[ "$conda_failed" == true ]] || [[ "$pip_failed" == true ]]; then
+            echo ""
+            echo "⚠️  Note: Some package scans failed. This might be due to:"
+            echo "   - Network connectivity issues"
+            echo "   - Missing tools (jq, curl, wget)"
+            echo "   - Repository/channel unavailability"
+        fi
+
         exit 0
     fi
 
@@ -957,20 +1226,77 @@ main() {
     fi
 
     # Execute approved updates
-    execute_approved_updates approved_updates "$use_safe_install"
+    local update_result=0
+    execute_approved_updates approved_updates "$use_safe_install" || update_result=$?
+
+    # Post-update actions
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📋 Post-Update Actions"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
 
     # Optional: Run health check after updates
-    if [[ "$HEALTH_CHECK_AFTER" == true ]] && [[ -f "./health_check.sh" ]]; then
-        echo ""
-        echo "🏥 Running health check..."
-        ./health_check.sh --quick
+    if [[ "$HEALTH_CHECK_AFTER" == true ]]; then
+        if [[ -f "./health_check.sh" ]]; then
+            echo "🏥 Running health check..."
+            if ./health_check.sh --quick; then
+                echo "✅ Health check passed"
+            else
+                echo "⚠️  Health check found issues (see above)"
+            fi
+            echo ""
+        else
+            echo "⚠️  health_check.sh not found, skipping health check"
+            echo ""
+        fi
     fi
 
     # Optional: Export environment after updates
-    if [[ "$EXPORT_AFTER" == true ]] && [[ -f "./export_env.sh" ]]; then
+    if [[ "$EXPORT_AFTER" == true ]]; then
+        if [[ -f "./export_env.sh" ]]; then
+            echo "💾 Exporting updated environment..."
+            if ./export_env.sh; then
+                echo "✅ Environment exported successfully"
+            else
+                echo "⚠️  Environment export failed"
+            fi
+            echo ""
+        else
+            echo "⚠️  export_env.sh not found, skipping export"
+            echo ""
+        fi
+    fi
+
+    # Final summary and recommendations
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✨ Update Process Complete"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    if [[ $update_result -eq 0 ]]; then
+        echo "✅ All updates completed successfully!"
         echo ""
-        echo "💾 Exporting environment..."
-        ./export_env.sh
+        echo "💡 Recommendations:"
+        echo "   - Test your workflows to ensure compatibility"
+        if [[ "$HEALTH_CHECK_AFTER" != true ]]; then
+            echo "   - Consider running: ./health_check.sh"
+        fi
+        if [[ "$EXPORT_AFTER" != true ]]; then
+            echo "   - Consider backing up: ./export_env.sh"
+        fi
+    else
+        echo "⚠️  Some updates failed (see summary above)"
+        echo ""
+        echo "💡 Troubleshooting:"
+        echo "   - Check error messages above for specific issues"
+        echo "   - Try updating failed packages individually"
+        echo "   - Review dependency conflicts with: ./find_duplicates.sh"
+        if [[ "$use_safe_install" == true ]]; then
+            echo "   - Rollback if needed: ./conda_rollback.sh"
+        fi
+        echo ""
+        exit 1
     fi
 }
 
