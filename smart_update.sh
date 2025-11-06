@@ -178,12 +178,15 @@ get_conda_updates() {
     # Check if jq is installed
     if ! command -v jq &> /dev/null; then
         echo "⚠️  Warning: jq not installed, falling back to text parsing"
-        # Fallback: use conda list --outdated without JSON
+        local outdated_output
         if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
-            conda list --outdated 2>/dev/null || echo ""
+            outdated_output=$(conda list --outdated 2>/dev/null || echo "")
         else
-            conda list -n "$env_name" --outdated 2>/dev/null || echo ""
+            outdated_output=$(conda list -n "$env_name" --outdated 2>/dev/null || echo "")
         fi
+
+        # Parse text format: skip header lines, format as "conda|package|current|latest"
+        echo "$outdated_output" | tail -n +4 | awk '{if (NF >= 4) print "conda|" $1 "|" $2 "|" $NF}'
         return
     fi
 
@@ -204,6 +207,14 @@ get_conda_updates() {
 check_conda_package_update() {
     local package=$1
     local env_name=$2
+    local cache_file
+    cache_file=$(get_cache_file "$package" "conda")
+
+    # Check cache first
+    if is_cache_valid "$cache_file"; then
+        cat "$cache_file"
+        return
+    fi
 
     # Get current version
     local current_version
@@ -222,7 +233,8 @@ check_conda_package_update() {
     fi
 
     if [[ "$current_version" != "$latest_version" ]]; then
-        echo "conda|$package|$current_version|$latest_version"
+        local result="conda|$package|$current_version|$latest_version"
+        echo "$result" | tee "$cache_file"
     fi
 }
 
