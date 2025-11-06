@@ -25,6 +25,19 @@
 
 set -euo pipefail
 
+# Cleanup trap for unexpected exits
+cleanup() {
+    local exit_code=$?
+    if [[ $exit_code -ne 0 ]]; then
+        echo ""
+        echo "❌ Script exited unexpectedly with error code $exit_code"
+        if [[ -n "${SAFE_INSTALL_PATH:-}" ]] && [[ -f "$SAFE_INSTALL_PATH" ]]; then
+            echo "   You can rollback changes with: ./conda_rollback.sh"
+        fi
+    fi
+}
+trap cleanup EXIT
+
 # Global variables
 VERBOSITY="default"  # default, summary, verbose
 TARGET_ENV=""
