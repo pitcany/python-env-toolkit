@@ -382,7 +382,7 @@ query_pypi_api() {
 
     # Try to fetch with timeout
     if command -v curl &> /dev/null; then
-        response=$(curl -s --max-time 5 "$pypi_url" 2>/dev/null || echo "")
+        response=$(curl -s -f --max-time 5 "$pypi_url" 2>/dev/null || echo "")
     elif command -v wget &> /dev/null; then
         response=$(wget -qO- --timeout=5 "$pypi_url" 2>/dev/null || echo "")
     else
@@ -414,7 +414,6 @@ extract_release_info() {
     # Extract release-specific information
     local has_security_fix=false
     local release_type="unknown"
-    local classifiers=()
 
     # Get classifiers for the package (not version-specific, but useful)
     local classifiers_json
@@ -425,15 +424,11 @@ extract_release_info() {
         has_security_fix=true
     fi
 
-    # Get release notes for the specific version
-    local release_data
-    release_data=$(echo "$pypi_data" | jq -r ".releases[\"$version\"]" 2>/dev/null || echo "")
-
     # Check release description for security keywords
     local description
     description=$(echo "$pypi_data" | jq -r ".releases[\"$version\"][0].comment_text // .info.description // empty" 2>/dev/null || echo "")
 
-    if echo "$description" | grep -qiE "(security|vulnerability|CVE-|exploit|patch)"; then
+    if echo "$description" | grep -qiE "(security|vulnerability|CVE-|exploit)"; then
         has_security_fix=true
         release_type="security"
     elif echo "$description" | grep -qiE "(bug|fix|bugfix)"; then
