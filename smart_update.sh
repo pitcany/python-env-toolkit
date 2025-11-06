@@ -742,34 +742,151 @@ prompt_user_decision() {
     done
 }
 
+verify_safe_install_available() {
+    local script_dir=$(dirname "$(readlink -f "$0")")
+    local safe_install_path="${script_dir}/safe_install.sh"
+
+    if [[ ! -f "$safe_install_path" ]]; then
+        echo "⚠️  Warning: safe_install.sh not found in $script_dir"
+        echo "   Updates will be performed without automatic rollback capability"
+        echo "   Continue anyway? [y/N]: "
+
+        if [[ "$NON_INTERACTIVE" != true ]]; then
+            read -n 1 -r response
+            echo ""
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                exit 1
+            fi
+        fi
+
+        return 1
+    fi
+
+    echo "$safe_install_path"
+    return 0
+}
+
+execute_update() {
+    local pkg_manager=$1
+    local package=$2
+    local version=$3
+    local use_safe_install=$4
+
+    echo "🔄 Installing $package $version via $pkg_manager..."
+
+    if [[ "$use_safe_install" == true ]] && [[ -n "$SAFE_INSTALL_PATH" ]]; then
+        # Use safe_install.sh for automatic rollback capability
+        if [[ "$pkg_manager" == "conda" ]]; then
+            "$SAFE_INSTALL_PATH" "${package}=${version}" --yes
+        else
+            "$SAFE_INSTALL_PATH" --pip "${package}==${version}" --yes
+        fi
+    else
+        # Direct installation without safe_install.sh
+        if [[ "$pkg_manager" == "conda" ]]; then
+            conda install -y "${package}=${version}"
+        else
+            pip install "${package}==${version}"
+        fi
+    fi
+
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
+        echo "✅ Successfully installed $package $version"
+        return 0
+    else
+        echo "❌ Failed to install $package $version"
+        return 1
+    fi
+}
+
+execute_approved_updates() {
+    local -n approved_refs=$1  # Name reference to array
+    local use_safe_install=$2
+
+    local total=${#approved_refs[@]}
+    local succeeded=0
+    local failed=0
+
+    echo ""
+    echo "═══════════════════════════════════════════════"
+    echo "Executing $total approved update(s)..."
+    echo "═══════════════════════════════════════════════"
+
+    for update in "${approved_refs[@]}"; do
+        IFS='|' read -r pkg_manager package current latest <<< "$update"
+
+        if execute_update "$pkg_manager" "$package" "$latest" "$use_safe_install"; then
+            ((succeeded++))
+        else
+            ((failed++))
+
+            # Ask if user wants to continue after failure
+            if [[ "$NON_INTERACTIVE" != true ]]; then
+                echo ""
+                read -p "Continue with remaining updates? [Y/n]: " -n 1 -r response
+                echo ""
+                if [[ "$response" =~ ^[Nn]$ ]]; then
+                    break
+                fi
+            fi
+        fi
+        echo ""
+    done
+
+    echo "═══════════════════════════════════════════════"
+    echo "Update Summary:"
+    echo "  ✅ Succeeded: $succeeded"
+    echo "  ❌ Failed: $failed"
+    echo "  📊 Total: $total"
+    echo "═══════════════════════════════════════════════"
+}
+
 main() {
     parse_arguments "$@"
     detect_environment
     initialize_cache
 
+    # Check for safe_install.sh
+    local use_safe_install=true
+    SAFE_INSTALL_PATH=$(verify_safe_install_available) || use_safe_install=false
+
+    # Optional: Check for duplicates first
+    if [[ "$CHECK_DUPLICATES" == true ]] && [[ -f "./find_duplicates.sh" ]]; then
+        echo "🔍 Checking for conda/pip duplicates..."
+        ./find_duplicates.sh
+        echo ""
+        read -p "Continue with updates? [Y/n]: " -n 1 -r response
+        echo ""
+        if [[ "$response" =~ ^[Nn]$ ]]; then
+            exit 0
+        fi
+    fi
+
+    # Collect available updates
     local updates=()
 
-    # Collect conda updates
     if [[ "$PIP_ONLY" != true ]]; then
         while IFS='|' read -r pkg_manager package current latest; do
-            updates+=("$pkg_manager|$package|$current|$latest")
+            [[ -n "$package" ]] && updates+=("$pkg_manager|$package|$current|$latest")
         done < <(get_conda_updates "$ENV_NAME")
     fi
 
-    # Collect pip updates
     if [[ "$CONDA_ONLY" != true ]]; then
         while IFS='|' read -r pkg_manager package current latest; do
-            updates+=("$pkg_manager|$package|$current|$latest")
+            [[ -n "$package" ]] && updates+=("$pkg_manager|$package|$current|$latest")
         done < <(get_pip_updates "$ENV_NAME")
     fi
 
-    echo ""
-    echo "📊 Found ${#updates[@]} package(s) with updates available"
-
+    # Check if any updates available
     if [[ ${#updates[@]} -eq 0 ]]; then
-        echo "   ✅ All packages are up to date!"
+        echo "✅ All packages are up to date!"
         exit 0
     fi
+
+    echo "📊 Found ${#updates[@]} package(s) with updates available"
+    echo ""
 
     # Interactive approval workflow
     local approved_updates=()
@@ -793,7 +910,7 @@ main() {
 
         case "$decision" in
             approve)
-                approved_updates+=("$update|$risk")
+                approved_updates+=("$update")
                 echo "   ✅ Approved"
                 ;;
             skip)
@@ -807,7 +924,7 @@ main() {
                 decision=$(prompt_user_decision "$package" true)
 
                 if [[ "$decision" == "approve" ]]; then
-                    approved_updates+=("$update|$risk")
+                    approved_updates+=("$update")
                     echo "   ✅ Approved"
                 elif [[ "$decision" == "skip" ]]; then
                     skipped_updates+=("$update")
@@ -829,7 +946,7 @@ main() {
     # Summary
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📊 Summary:"
+    echo "📊 Approval Summary:"
     echo "   ✅ Approved: ${#approved_updates[@]}"
     echo "   ⏭️  Skipped: ${#skipped_updates[@]}"
 
@@ -839,18 +956,22 @@ main() {
         exit 0
     fi
 
-    # Display approved updates
-    echo ""
-    echo "The following packages will be updated:"
-    for approved in "${approved_updates[@]}"; do
-        IFS='|' read -r pkg_manager package current latest risk <<< "$approved"
-        echo "   - $package: $current → $latest [$risk]"
-    done
+    # Execute approved updates
+    execute_approved_updates approved_updates "$use_safe_install"
 
-    echo ""
-    echo "✅ Update approval complete. Ready to install ${#approved_updates[@]} package(s)."
-    echo ""
-    echo "Note: Use safe_install.sh integration for actual installation (coming in next task)"
+    # Optional: Run health check after updates
+    if [[ "$HEALTH_CHECK_AFTER" == true ]] && [[ -f "./health_check.sh" ]]; then
+        echo ""
+        echo "🏥 Running health check..."
+        ./health_check.sh --quick
+    fi
+
+    # Optional: Export environment after updates
+    if [[ "$EXPORT_AFTER" == true ]] && [[ -f "./export_env.sh" ]]; then
+        echo ""
+        echo "💾 Exporting environment..."
+        ./export_env.sh
+    fi
 }
 
 # Run main
