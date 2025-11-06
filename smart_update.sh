@@ -513,6 +513,95 @@ get_pip_updates() {
     echo "$outdated_output" | jq -r '.[] | "pip|\(.name)|\(.version)|\(.latest_version)"'
 }
 
+format_update_display() {
+    local verbosity=$1
+    local pkg_manager=$2
+    local package=$3
+    local current=$4
+    local latest=$5
+    local risk=$6
+    local version_change=$7
+    local dep_count=$8
+    local risk_factors=$9
+
+    case "$verbosity" in
+        summary)
+            # Compact one-liner
+            local risk_short
+            case "$risk" in
+                "$RISK_LOW") risk_short="LOW" ;;
+                "$RISK_MEDIUM") risk_short="MED" ;;
+                "$RISK_HIGH") risk_short="HI " ;;
+            esac
+            echo "📦 $package $current→$latest [$risk_short] ${version_change^}"
+            ;;
+        verbose)
+            # Detailed breakdown
+            echo "📦 $package: $current → $latest"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Risk Score: $risk"
+            echo "├─ Version change: ${version_change^} [$risk]"
+            if [[ $dep_count -gt 0 ]]; then
+                echo "├─ Dependency impact: $dep_count packages affected"
+            fi
+            echo "└─ Package manager: $pkg_manager"
+            ;;
+        *)
+            # Default compact mode
+            echo "📦 $package: $current → $latest [$risk RISK]"
+            local reason="${version_change^} version bump"
+            if [[ $dep_count -gt 0 ]]; then
+                reason="$reason + $dep_count dependency changes"
+            fi
+            echo "   Reason: $reason"
+            ;;
+    esac
+}
+
+prompt_user_decision() {
+    local package=$1
+    local show_details=${2:-false}
+
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        echo "approve"  # Auto-approve in non-interactive mode
+        return
+    fi
+
+    while true; do
+        echo ""
+        if [[ "$show_details" == true ]]; then
+            echo -n "   [a]pprove  [s]kip  [q]uit: "
+        else
+            echo -n "   [a]pprove  [s]kip  [d]etails  [q]uit: "
+        fi
+        read -r decision
+
+        case "$decision" in
+            a|A)
+                echo "approve"
+                return
+                ;;
+            s|S)
+                echo "skip"
+                return
+                ;;
+            d|D)
+                if [[ "$show_details" == false ]]; then
+                    echo "details"
+                    return
+                fi
+                ;;
+            q|Q)
+                echo "quit"
+                return
+                ;;
+            *)
+                echo "   Invalid choice. Please enter a, s, d, or q."
+                ;;
+        esac
+    done
+}
+
 main() {
     parse_arguments "$@"
     detect_environment
@@ -537,25 +626,91 @@ main() {
     echo ""
     echo "📊 Found ${#updates[@]} package(s) with updates available"
 
-    # Display updates for testing with risk assessment
-    if [[ ${#updates[@]} -gt 0 ]]; then
-        for update in "${updates[@]}"; do
-            IFS='|' read -r pkg_manager package current latest <<< "$update"
-
-            # Assess risk for this package
-            local risk_assessment
-            risk_assessment=$(assess_package_risk "$pkg_manager" "$package" "$current" "$latest" "$ENV_NAME")
-            IFS='|' read -r risk version_change dep_count dep_packages risk_factors <<< "$risk_assessment"
-
-            echo "   [$pkg_manager] $package: $current → $latest [RISK: $risk]"
-            echo "      Risk factors: ${risk_factors//;/, }"
-            if [[ $dep_count -gt 0 ]]; then
-                echo "      Dependencies affected: $dep_count"
-            fi
-        done
-    else
+    if [[ ${#updates[@]} -eq 0 ]]; then
         echo "   ✅ All packages are up to date!"
+        exit 0
     fi
+
+    # Interactive approval workflow
+    local approved_updates=()
+    local skipped_updates=()
+
+    for update in "${updates[@]}"; do
+        IFS='|' read -r pkg_manager package current latest <<< "$update"
+
+        # Assess risk for this package
+        local risk_assessment
+        risk_assessment=$(assess_package_risk "$pkg_manager" "$package" "$current" "$latest" "$ENV_NAME")
+        IFS='|' read -r risk version_change dep_count dep_packages risk_factors <<< "$risk_assessment"
+
+        # Display update in current verbosity mode
+        echo ""
+        format_update_display "$VERBOSITY" "$pkg_manager" "$package" "$current" "$latest" "$risk" "$version_change" "$dep_count" "$risk_factors"
+
+        # Prompt for decision
+        local decision
+        decision=$(prompt_user_decision "$package" false)
+
+        case "$decision" in
+            approve)
+                approved_updates+=("$update|$risk")
+                echo "   ✅ Approved"
+                ;;
+            skip)
+                skipped_updates+=("$update")
+                echo "   ⏭️  Skipped"
+                ;;
+            details)
+                # Show verbose view, then prompt again
+                echo ""
+                format_update_display "verbose" "$pkg_manager" "$package" "$current" "$latest" "$risk" "$version_change" "$dep_count" "$risk_factors"
+                decision=$(prompt_user_decision "$package" true)
+
+                if [[ "$decision" == "approve" ]]; then
+                    approved_updates+=("$update|$risk")
+                    echo "   ✅ Approved"
+                elif [[ "$decision" == "skip" ]]; then
+                    skipped_updates+=("$update")
+                    echo "   ⏭️  Skipped"
+                elif [[ "$decision" == "quit" ]]; then
+                    echo ""
+                    echo "❌ Update process cancelled by user"
+                    exit 0
+                fi
+                ;;
+            quit)
+                echo ""
+                echo "❌ Update process cancelled by user"
+                exit 0
+                ;;
+        esac
+    done
+
+    # Summary
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 Summary:"
+    echo "   ✅ Approved: ${#approved_updates[@]}"
+    echo "   ⏭️  Skipped: ${#skipped_updates[@]}"
+
+    if [[ ${#approved_updates[@]} -eq 0 ]]; then
+        echo ""
+        echo "No packages to update. Exiting."
+        exit 0
+    fi
+
+    # Display approved updates
+    echo ""
+    echo "The following packages will be updated:"
+    for approved in "${approved_updates[@]}"; do
+        IFS='|' read -r pkg_manager package current latest risk <<< "$approved"
+        echo "   - $package: $current → $latest [$risk]"
+    done
+
+    echo ""
+    echo "✅ Update approval complete. Ready to install ${#approved_updates[@]} package(s)."
+    echo ""
+    echo "Note: Use safe_install.sh integration for actual installation (coming in next task)"
 }
 
 # Run main
