@@ -238,6 +238,48 @@ check_conda_package_update() {
     fi
 }
 
+get_pip_updates() {
+    local env_name=$1
+
+    echo "🔍 Checking pip packages..." >&2
+
+    # Activate environment if needed
+    local pip_cmd="pip"
+    if [[ "$env_name" != "$CONDA_DEFAULT_ENV" ]]; then
+        # Get conda environment path and use its pip
+        local env_path
+        env_path=$(conda env list | grep "^${env_name} " | awk '{print $NF}')
+        if [[ -z "$env_path" ]]; then
+            echo "⚠️  Warning: Could not find environment path for $env_name" >&2
+            return
+        fi
+        pip_cmd="${env_path}/bin/pip"
+        if [[ ! -f "$pip_cmd" ]]; then
+            echo "⚠️  Warning: pip not found in environment $env_name" >&2
+            return
+        fi
+    fi
+
+    # Check if pip is available
+    if ! command -v "$pip_cmd" &> /dev/null; then
+        echo "⚠️  Warning: pip not available in environment" >&2
+        return
+    fi
+
+    # Get outdated packages using pip list --outdated
+    local outdated_output
+    outdated_output=$($pip_cmd list --outdated --format=json 2>/dev/null || echo "[]")
+
+    # Check if jq is available for JSON parsing
+    if ! command -v jq &> /dev/null; then
+        echo "⚠️  Warning: jq not installed, skipping pip updates" >&2
+        return
+    fi
+
+    # Parse JSON output
+    echo "$outdated_output" | jq -r '.[] | "pip|\(.name)|\(.version)|\(.latest_version)"'
+}
+
 main() {
     parse_arguments "$@"
     detect_environment
@@ -252,14 +294,25 @@ main() {
         done < <(get_conda_updates "$ENV_NAME")
     fi
 
+    # Collect pip updates
+    if [[ "$CONDA_ONLY" != true ]]; then
+        while IFS='|' read -r pkg_manager package current latest; do
+            updates+=("$pkg_manager|$package|$current|$latest")
+        done < <(get_pip_updates "$ENV_NAME")
+    fi
+
     echo ""
-    echo "📊 Found ${#updates[@]} conda package(s) with updates available"
+    echo "📊 Found ${#updates[@]} package(s) with updates available"
 
     # Display updates for testing
-    for update in "${updates[@]}"; do
-        IFS='|' read -r pkg_manager package current latest <<< "$update"
-        echo "   $package: $current → $latest"
-    done
+    if [[ ${#updates[@]} -gt 0 ]]; then
+        for update in "${updates[@]}"; do
+            IFS='|' read -r pkg_manager package current latest <<< "$update"
+            echo "   [$pkg_manager] $package: $current → $latest"
+        done
+    else
+        echo "   ✅ All packages are up to date!"
+    fi
 }
 
 # Run main
