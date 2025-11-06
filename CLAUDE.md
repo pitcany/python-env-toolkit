@@ -38,6 +38,15 @@ The codebase follows a **flat, single-directory structure** with no subdirectori
 
 #### 📦 Package Management
 
+**smart_update.sh** - Intelligent package update assistant with risk-based decision making
+- Analyzes available updates for conda and pip packages
+- Calculates risk scores using semantic versioning, dependency impact, and security advisories
+- Interactive approval workflow with configurable verbosity (default/summary/verbose)
+- Batch mode to review all updates before applying
+- Integrates with `safe_install.sh` for automatic rollback points
+- Optional pre-check for duplicates and post-update health check
+- Caching of PyPI API responses (1-hour TTL) with `--refresh` to clear
+
 **safe_install.sh** - Safe package installation with dry-run and rollback
 - Dry-run preview of changes before installation
 - Automatic conda revision snapshots (rollback points)
@@ -149,6 +158,15 @@ conda activate myproject
 ./health_check.sh
 ```
 
+**Intelligent package updates:**
+```bash
+conda activate myenv
+./smart_update.sh                         # Interactive update workflow
+./smart_update.sh --verbose               # Detailed risk breakdown
+./smart_update.sh --batch                 # Review all updates first
+./smart_update.sh --check-duplicates --health-check-after  # With pre/post checks
+```
+
 **Safe package installation:**
 ```bash
 conda activate myenv
@@ -244,7 +262,8 @@ All scripts use `set -euo pipefail` for strict error handling (exit on error, tr
 - Standard Unix utilities (grep, sed, awk, cut, xargs) must be available
 
 ### Script Independence
-Scripts are **independent** and don't call each other (except health_check.sh may optionally call find_duplicates.sh if available), but complement each other in workflows:
+Scripts are **independent** and don't call each other (except health_check.sh may optionally call find_duplicates.sh if available, and smart_update.sh calls safe_install.sh internally), but complement each other in workflows:
+- Use `smart_update.sh` for risk-aware package updates with interactive approval
 - Use `export_env.sh` before `clean_env.sh` or `nuke_conda_envs.sh` for backup
 - Use `safe_install.sh` for installations with automatic rollback points
 - Use `conda_rollback.sh` as undo mechanism for environment changes
@@ -252,6 +271,7 @@ Scripts are **independent** and don't call each other (except health_check.sh ma
 - Use `create_ml_env.sh` with `--register-kernel` or follow up with `manage_jupyter_kernels.sh add`
 - Use `clone_env.sh` to create modified copies without affecting originals
 - Use `poetry_bind_conda.sh` for hybrid Conda+Poetry workflows
+- Use `smart_update.sh --check-duplicates --health-check-after` to ensure clean state before and after updates
 
 ### Testing
 No automated test suite exists. Test manually in isolated Conda test environments, not production ones. Test cases should include: empty environments, environments with multiple packages, no active environment, invalid inputs, and cancellation prompts.

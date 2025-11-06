@@ -106,6 +106,7 @@ See [examples/README.md](examples/README.md) for:
 
 | Script | Purpose | Key Features |
 |--------|---------|--------------|
+| **smart_update.sh** | Intelligent update assistant | Risk-based decisions, interactive approval, batch mode |
 | **safe_install.sh** | Install with preview & rollback | Dry-run preview, automatic snapshots, instant rollback |
 | **export_env.sh** | Export environment specs | YAML + requirements.txt, cross-platform compatible |
 | **sync_env.sh** | Sync from YAML/requirements | Update packages, prune extras, maintain consistency |
@@ -197,6 +198,113 @@ Clone existing environments with intelligent modifications:
 ---
 
 ## Package Management
+
+### Intelligent Package Updates
+
+Use `smart_update.sh` for risk-aware package updates with interactive approval:
+
+```bash
+conda activate myenv
+
+# Interactive mode with default output
+./smart_update.sh
+
+# Verbose mode - detailed risk breakdown
+./smart_update.sh --verbose
+
+# Summary mode - minimal one-line output
+./smart_update.sh --summary
+
+# Batch mode - review all updates first, then approve
+./smart_update.sh --batch
+
+# Target specific environment
+./smart_update.sh --name myenv
+
+# Only check conda packages
+./smart_update.sh --conda-only
+
+# Only check pip packages
+./smart_update.sh --pip-only
+
+# Pre-check for conflicts and post-update health check
+./smart_update.sh --check-duplicates --health-check-after
+
+# Export environment after updates
+./smart_update.sh --export-after
+
+# Refresh cache (clear PyPI API cache)
+./smart_update.sh --refresh
+```
+
+**How it works:**
+
+1. **Detects available updates** - Queries conda and pip for outdated packages
+2. **Calculates risk scores** - Analyzes version changes, dependency impacts, and security advisories
+3. **Interactive approval** - Present each update with risk assessment and options:
+   - `[a]pprove` - Apply this update
+   - `[s]kip` - Skip this update
+   - `[d]etails` - Toggle verbose view for this package
+   - `[q]uit` - Exit without applying remaining updates
+4. **Batch execution** - Uses `safe_install.sh` internally for automatic rollback points
+5. **Post-update actions** - Optional health check and environment export
+
+**Risk Scoring System:**
+
+The script calculates risk based on multiple factors:
+
+1. **Semantic Versioning:**
+   - Major bump (2.x → 3.x) = HIGH risk (breaking changes expected)
+   - Minor bump (2.1 → 2.2) = MEDIUM risk (new features, possible behavior changes)
+   - Patch bump (2.1.1 → 2.1.2) = LOW risk (bug fixes only)
+
+2. **Dependency Impact Modifier:**
+   - 0 other packages affected: no change
+   - 1-3 packages affected: +1 risk level
+   - 4+ packages affected: +2 risk levels
+
+3. **Security/Bug Fix Modifier:**
+   - Security fix detected: -1 risk level (minimum LOW)
+   - Checks PyPI API for security advisories and classifiers
+
+**Output Modes:**
+
+**Default (compact):**
+```
+📦 numpy: 1.24.3 → 1.26.4 [MEDIUM RISK]
+   Reason: Minor version bump + 2 dependency changes
+
+   [a]pprove  [s]kip  [d]etails  [q]uit:
+```
+
+**Summary (`--summary`):**
+```
+📦 numpy 1.24.3→1.26.4 [MED] Minor+deps | [a/s/d/q]:
+```
+
+**Verbose (`--verbose`):**
+```
+📦 numpy: 1.24.3 → 1.26.4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Risk Score: MEDIUM
+├─ Version change: Minor (1.24→1.26) [MEDIUM]
+├─ Dependency impact: 2 packages affected [+1 risk]
+│  └─ pandas 2.0.0 → 2.0.3
+│  └─ scikit-learn will be upgraded
+├─ Release type: Bug fixes + features
+└─ Security advisories: None found
+
+[a]pprove  [s]kip  [d]etails  [q]uit:
+```
+
+**Best Practices:**
+
+- Run `--check-duplicates` flag before updates to ensure clean state
+- Use `--verbose` mode when updating critical dependencies
+- Use `--batch` mode to review all updates before applying
+- Enable `--health-check-after` to verify environment health
+- Use `--export-after` to automatically backup environment post-update
+- Clear cache with `--refresh` if you see stale update information
 
 ### Safe Installation with Preview
 
@@ -501,6 +609,27 @@ conda activate myproject
 ./export_env.sh --file-yml myproject-env.yml
 ```
 
+### Regular Maintenance and Updates
+
+```bash
+conda activate myenv
+
+# 1. Check for and apply updates intelligently
+./smart_update.sh --verbose --check-duplicates
+
+# 2. Review what was updated
+conda list --revisions
+
+# 3. Verify environment health
+./health_check.sh
+
+# 4. Export updated environment
+./export_env.sh
+
+# If issues arise, rollback easily
+./conda_rollback.sh
+```
+
 ### Setting Up on New Machine
 
 ```bash
@@ -622,6 +751,19 @@ python -c "import torch; print(torch.cuda.is_available())"
 
 ## Troubleshooting
 
+### "Should I update this package?"
+
+```bash
+# Use smart_update.sh for risk analysis
+./smart_update.sh --verbose
+
+# Reviews each update with:
+# - Version change type (major/minor/patch)
+# - Dependency impact
+# - Security advisories
+# - Interactive approval
+```
+
 ### "Package X conflicts with Y"
 
 ```bash
@@ -737,6 +879,10 @@ These scripts are provided as-is for personal and professional use. Modify and d
 ```bash
 # Create new environment
 ./create_ml_env.sh <name> --template <template>
+
+# Update packages intelligently
+./smart_update.sh
+./smart_update.sh --verbose --check-duplicates
 
 # Install packages safely
 ./safe_install.sh <packages> --dry-run
