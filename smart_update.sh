@@ -161,13 +161,13 @@ is_cache_valid() {
         return 1
     fi
 
-    local cache_age=$(( $(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
-
-    if [[ $cache_age -gt $CACHE_TTL ]]; then
-        return 1
+    # Use find for cross-platform compatibility
+    # Check if file was modified within CACHE_TTL seconds
+    if find "$cache_file" -mmin -$((CACHE_TTL / 60)) 2>/dev/null | grep -q .; then
+        return 0
     fi
 
-    return 0
+    return 1
 }
 
 main() {
