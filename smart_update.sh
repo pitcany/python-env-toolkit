@@ -43,7 +43,6 @@ VERBOSITY="default"  # default, summary, verbose
 TARGET_ENV=""
 CONDA_ONLY=false
 PIP_ONLY=false
-BATCH_MODE=false
 CHECK_DUPLICATES=false
 HEALTH_CHECK_AFTER=false
 EXPORT_AFTER=false
@@ -54,11 +53,11 @@ NON_INTERACTIVE=false
 CACHE_DIR=""
 CACHE_TTL=3600  # 1 hour in seconds
 
-# Color codes (following toolkit patterns)
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'  # No Color
+# Color codes (following toolkit patterns) - reserved for future use
+# RED='\033[0;31m'
+# GREEN='\033[0;32m'
+# YELLOW='\033[1;33m'
+# NC='\033[0m'  # No Color
 
 # Risk levels
 RISK_LOW="LOW"
@@ -118,7 +117,8 @@ parse_arguments() {
                 shift
                 ;;
             --batch)
-                BATCH_MODE=true
+                # Reserved for future batch mode implementation
+                echo "⚠️  Warning: --batch mode not yet implemented"
                 shift
                 ;;
             --check-duplicates)
@@ -145,7 +145,7 @@ parse_arguments() {
                 test_version_parsing
                 ;;
             -h|--help)
-                head -n 30 "$0" | grep "^#" | sed 's/^# //'
+                head -n 25 "$0" | grep "^#" | sed 's/^# //' | sed 's/^#//'
                 exit 0
                 ;;
             *)
@@ -594,9 +594,7 @@ extract_release_info() {
     fi
 
     # Get vulnerability warnings if available (some packages include this)
-    local has_vuln_warning=false
     if echo "$pypi_data" | jq -e '.vulnerabilities' &>/dev/null; then
-        has_vuln_warning=true
         has_security_fix=true
         release_type="security"
     fi
@@ -615,9 +613,12 @@ check_pypi_security() {
 
     # Query PyPI API
     local pypi_data
-    pypi_data=$(query_pypi_api "$package" "$new_version")
+    if ! pypi_data=$(query_pypi_api "$package" "$new_version"); then
+        echo "false|unknown|API unavailable"
+        return 0
+    fi
 
-    if [[ $? -ne 0 ]] || [[ -z "$pypi_data" ]]; then
+    if [[ -z "$pypi_data" ]]; then
         echo "false|unknown|API unavailable"
         return 0
     fi
@@ -664,7 +665,7 @@ assess_package_risk() {
     local security_info="false|unknown|"
     if [[ "$pkg_manager" == "pip" ]]; then
         security_info=$(check_pypi_security "$package" "$latest_version")
-        IFS='|' read -r has_security release_type security_msg <<< "$security_info"
+        IFS='|' read -r has_security release_type _ <<< "$security_info"
 
         if [[ "$has_security" == "true" ]]; then
             risk_factors+=("Security: $release_type fix detected")
@@ -759,11 +760,13 @@ check_conda_package_update() {
 
     # Search for latest version with timeout and error handling
     local latest_version
-    latest_version=$(timeout 10 conda search "$package" --json 2>/dev/null | jq -r ".[\"$package\"][-1].version" 2>/dev/null)
-
-    # Handle search failures gracefully
-    if [[ $? -ne 0 ]] || [[ -z "$latest_version" ]] || [[ "$latest_version" == "null" ]]; then
+    if ! latest_version=$(timeout 10 conda search "$package" --json 2>/dev/null | jq -r ".[\"$package\"][-1].version" 2>/dev/null); then
         # Search failed - could be network issue or package not in current channels
+        return
+    fi
+
+    # Validate result
+    if [[ -z "$latest_version" ]] || [[ "$latest_version" == "null" ]]; then
         return
     fi
 
@@ -832,11 +835,11 @@ format_update_display() {
     local risk=$6
     local version_change=$7
     local dep_count=$8
-    local risk_factors=$9
+    local risk_factors_str=$9
     local security_info="${10:-false|unknown|}"
 
     # Parse security info
-    IFS='|' read -r has_security release_type security_msg <<< "$security_info"
+    IFS='|' read -r has_security release_type _ <<< "$security_info"
 
     case "$verbosity" in
         summary)
@@ -931,7 +934,8 @@ prompt_user_decision() {
 }
 
 verify_safe_install_available() {
-    local script_dir=$(dirname "$(readlink -f "$0")")
+    local script_dir
+    script_dir=$(dirname "$(readlink -f "$0")")
     local safe_install_path="${script_dir}/safe_install.sh"
 
     if [[ ! -f "$safe_install_path" ]]; then
@@ -1097,8 +1101,7 @@ main() {
 
     # Pre-flight checks
     check_required_tools
-    local has_internet=true
-    check_internet_connectivity || has_internet=false
+    check_internet_connectivity || true  # Continue even if no internet
     echo ""
 
     detect_environment
