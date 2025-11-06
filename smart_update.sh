@@ -315,7 +315,7 @@ check_conda_dependencies() {
 
     # Parse output for UPDATED, DOWNGRADED, or new packages
     while IFS= read -r line; do
-        if [[ $line =~ UPDATED|DOWNGRADED|installed ]]; then
+        if [[ $line == *"UPDATED"* ]] || [[ $line == *"DOWNGRADED"* ]] || [[ $line == *"installed"* ]]; then
             # Extract package names (this is a simplified parser)
             local pkg_name
             pkg_name=$(echo "$line" | awk '{print $1}')
@@ -357,7 +357,7 @@ check_pip_dependencies() {
 
     if [[ -n "$deps_output" ]]; then
         # Count dependencies
-        affected_count=$(echo "$deps_output" | tr ',' '\n' | grep -v "^$" | wc -l)
+        affected_count=$(echo "$deps_output" | tr ',' '\n' | grep -c . || echo 0)
     fi
 
     echo "$affected_count|${affected_packages[*]}"
@@ -548,7 +548,7 @@ main() {
             IFS='|' read -r risk version_change dep_count dep_packages risk_factors <<< "$risk_assessment"
 
             echo "   [$pkg_manager] $package: $current → $latest [RISK: $risk]"
-            echo "      Risk factors: $(echo "$risk_factors" | sed 's/;/, /g')"
+            echo "      Risk factors: ${risk_factors//;/, }"
             if [[ $dep_count -gt 0 ]]; then
                 echo "      Dependencies affected: $dep_count"
             fi
