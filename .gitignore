@@ -32,3 +32,6 @@ __pycache__/
 
 # OS
 Thumbs.db
+
+# Git worktrees
+.worktrees/
