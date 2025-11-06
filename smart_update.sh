@@ -136,13 +136,46 @@ detect_environment() {
     echo "🧭 Environment: $ENV_NAME"
 }
 
+initialize_cache() {
+    if [[ "$REFRESH_CACHE" == true ]] && [[ -d "$CACHE_DIR" ]]; then
+        echo "🧹 Clearing cache..."
+        rm -rf "$CACHE_DIR"
+    fi
+
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        mkdir -p "$CACHE_DIR"
+        echo "📁 Created cache directory: $CACHE_DIR"
+    fi
+}
+
+get_cache_file() {
+    local package=$1
+    local cache_type=$2  # "pypi" or "conda"
+    echo "${CACHE_DIR}/${cache_type}_${package}.json"
+}
+
+is_cache_valid() {
+    local cache_file=$1
+
+    if [[ ! -f "$cache_file" ]]; then
+        return 1
+    fi
+
+    local cache_age=$(( $(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
+
+    if [[ $cache_age -gt $CACHE_TTL ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
 main() {
     parse_arguments "$@"
     detect_environment
+    initialize_cache
 
-    echo "✅ Script initialized successfully"
-    echo "   Verbosity: $VERBOSITY"
-    echo "   Cache: $CACHE_DIR"
+    echo "✅ Initialization complete"
 }
 
 # Run main
