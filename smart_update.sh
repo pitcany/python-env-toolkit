@@ -52,6 +52,35 @@ RISK_LOW="LOW"
 RISK_MEDIUM="MEDIUM"
 RISK_HIGH="HIGH"
 
+test_version_parsing() {
+    echo "Testing version parsing..."
+
+    # Test cases
+    local tests=(
+        "1.2.3|2.0.0|major|HIGH"
+        "1.2.3|1.3.0|minor|MEDIUM"
+        "1.2.3|1.2.4|patch|LOW"
+        "2.0.0|2.1.0|minor|MEDIUM"
+    )
+
+    for test in "${tests[@]}"; do
+        IFS='|' read -r current latest expected_change expected_risk <<< "$test"
+
+        local actual_change
+        actual_change=$(compare_versions "$current" "$latest")
+        local actual_risk
+        actual_risk=$(calculate_base_risk "$actual_change")
+
+        if [[ "$actual_change" == "$expected_change" ]] && [[ "$actual_risk" == "$expected_risk" ]]; then
+            echo "✅ $current → $latest: $actual_change ($actual_risk)"
+        else
+            echo "❌ $current → $latest: expected $expected_change/$expected_risk, got $actual_change/$actual_risk"
+        fi
+    done
+
+    exit 0
+}
+
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -98,6 +127,9 @@ parse_arguments() {
             --yes)
                 NON_INTERACTIVE=true
                 shift
+                ;;
+            --test)
+                test_version_parsing
                 ;;
             -h|--help)
                 head -n 30 "$0" | grep "^#" | sed 's/^# //'
@@ -168,6 +200,100 @@ is_cache_valid() {
     fi
 
     return 1
+}
+
+parse_semver() {
+    local version=$1
+
+    # Remove leading 'v' if present
+    version=${version#v}
+
+    # Extract major.minor.patch using regex
+    if [[ $version =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
+    elif [[ $version =~ ^([0-9]+)\.([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} 0"
+    elif [[ $version =~ ^([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]} 0 0"
+    else
+        # Non-semver version (e.g., "2023.1", "latest")
+        echo "0 0 0"
+    fi
+}
+
+compare_versions() {
+    local current=$1
+    local latest=$2
+
+    read -r curr_major curr_minor curr_patch <<< "$(parse_semver "$current")"
+    read -r new_major new_minor new_patch <<< "$(parse_semver "$latest")"
+
+    # Determine version bump type
+    if [[ $new_major -gt $curr_major ]]; then
+        echo "major"
+    elif [[ $new_minor -gt $curr_minor ]]; then
+        echo "minor"
+    elif [[ $new_patch -gt $curr_patch ]]; then
+        echo "patch"
+    else
+        echo "unknown"
+    fi
+}
+
+calculate_base_risk() {
+    local version_change=$1
+
+    case "$version_change" in
+        major)
+            echo "$RISK_HIGH"
+            ;;
+        minor)
+            echo "$RISK_MEDIUM"
+            ;;
+        patch)
+            echo "$RISK_LOW"
+            ;;
+        *)
+            echo "$RISK_MEDIUM"  # Unknown version scheme, be cautious
+            ;;
+    esac
+}
+
+elevate_risk() {
+    local current_risk=$1
+    local levels=${2:-1}  # How many levels to elevate
+
+    case "$current_risk" in
+        "$RISK_LOW")
+            if [[ $levels -ge 2 ]]; then
+                echo "$RISK_HIGH"
+            else
+                echo "$RISK_MEDIUM"
+            fi
+            ;;
+        "$RISK_MEDIUM")
+            echo "$RISK_HIGH"
+            ;;
+        "$RISK_HIGH")
+            echo "$RISK_HIGH"  # Already at max
+            ;;
+    esac
+}
+
+lower_risk() {
+    local current_risk=$1
+
+    case "$current_risk" in
+        "$RISK_HIGH")
+            echo "$RISK_MEDIUM"
+            ;;
+        "$RISK_MEDIUM")
+            echo "$RISK_LOW"
+            ;;
+        "$RISK_LOW")
+            echo "$RISK_LOW"  # Already at min
+            ;;
+    esac
 }
 
 get_conda_updates() {
