@@ -35,7 +35,7 @@ for script in "${scripts[@]}"; do
         : # Help works
     else
         echo "FAIL: $script --help failed"
-        ((failed++))
+        failed=$((failed + 1))
     fi
 
     # Test -h flag
@@ -44,7 +44,7 @@ for script in "${scripts[@]}"; do
         : # Help works
     else
         echo "FAIL: $script -h failed"
-        ((failed++))
+        failed=$((failed + 1))
     fi
 done
 

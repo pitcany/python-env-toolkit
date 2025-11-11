@@ -15,7 +15,7 @@ failed=0
 checked=0
 
 for script in "${scripts[@]}"; do
-    ((checked++))
+    checked=$((checked + 1))
 
     # Check for set -e (or variations)
     if ! grep -q "set -e" "$script"; then

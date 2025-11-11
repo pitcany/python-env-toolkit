@@ -23,20 +23,20 @@ failed=0
 # Test 1: show_version function exists
 if ! declare -f show_version >/dev/null; then
     echo "FAIL: show_version function not defined"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 # Test 2: VERSION file can be loaded
 if [[ -z "${TOOLKIT_VERSION:-}" ]]; then
     echo "FAIL: TOOLKIT_VERSION not set after sourcing common.sh"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 # Test 3: Error functions exist
 for func in error_env_not_found error_command_not_found error_invalid_flag; do
     if ! declare -f "$func" >/dev/null; then
         echo "FAIL: $func function not defined"
-        ((failed++))
+        failed=$((failed + 1))
     fi
 done
 
@@ -44,7 +44,7 @@ done
 for func in validate_conda_env check_required_dependency check_optional_dependency; do
     if ! declare -f "$func" >/dev/null; then
         echo "FAIL: $func function not defined"
-        ((failed++))
+        failed=$((failed + 1))
     fi
 done
 
