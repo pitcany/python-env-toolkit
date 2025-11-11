@@ -34,6 +34,11 @@
 
 set -euo pipefail
 
+# Source common library for cross-platform compatibility
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -231,7 +236,7 @@ cp "$TEMP_YML" "$MODIFIED_YML"
 # Change Python version
 if [[ -n "$PYTHON_VERSION" ]]; then
     print_info "Applying: Python version change..."
-    sed -i "s|^  - python=.*|  - python=$PYTHON_VERSION|" "$MODIFIED_YML"
+    sed_inplace "s|^  - python=.*|  - python=$PYTHON_VERSION|" "$MODIFIED_YML"
 fi
 
 # Swap frameworks
@@ -241,26 +246,26 @@ if [[ -n "$SWAP_FRAMEWORK" ]]; then
     case "$SWAP_FRAMEWORK" in
         pytorch-\>tensorflow|pytorch-\>tf)
             # Remove PyTorch packages
-            sed -i '/pytorch/d' "$MODIFIED_YML"
-            sed -i '/torchvision/d' "$MODIFIED_YML"
-            sed -i '/torchaudio/d' "$MODIFIED_YML"
+            sed_inplace '/pytorch/d' "$MODIFIED_YML"
+            sed_inplace '/torchvision/d' "$MODIFIED_YML"
+            sed_inplace '/torchaudio/d' "$MODIFIED_YML"
             # Add TensorFlow (let conda resolve version)
-            sed -i '/^dependencies:/a\  - tensorflow' "$MODIFIED_YML"
+            sed_inplace '/^dependencies:/a\  - tensorflow' "$MODIFIED_YML"
             ;;
         tensorflow-\>pytorch|tf-\>pytorch)
             # Remove TensorFlow packages
-            sed -i '/tensorflow/d' "$MODIFIED_YML"
-            sed -i '/keras/d' "$MODIFIED_YML"
+            sed_inplace '/tensorflow/d' "$MODIFIED_YML"
+            sed_inplace '/keras/d' "$MODIFIED_YML"
             # Add PyTorch (let conda resolve version)
-            sed -i '/^dependencies:/a\  - pytorch\n  - torchvision' "$MODIFIED_YML"
+            sed_inplace '/^dependencies:/a\  - pytorch\n  - torchvision' "$MODIFIED_YML"
             ;;
         pytorch-\>jax)
             # Remove PyTorch packages
-            sed -i '/pytorch/d' "$MODIFIED_YML"
-            sed -i '/torchvision/d' "$MODIFIED_YML"
-            sed -i '/torchaudio/d' "$MODIFIED_YML"
+            sed_inplace '/pytorch/d' "$MODIFIED_YML"
+            sed_inplace '/torchvision/d' "$MODIFIED_YML"
+            sed_inplace '/torchaudio/d' "$MODIFIED_YML"
             # Add JAX (pip package usually)
-            sed -i '/^dependencies:/a\  - pip:\n    - jax\n    - jaxlib' "$MODIFIED_YML"
+            sed_inplace '/^dependencies:/a\  - pip:\n    - jax\n    - jaxlib' "$MODIFIED_YML"
             ;;
         *)
             print_error "Unsupported framework swap: $SWAP_FRAMEWORK"
@@ -273,19 +278,19 @@ fi
 if [[ "$CPU_TO_GPU" == true ]]; then
     print_info "Applying: CPU to GPU conversion..."
     # PyTorch: cpuonly -> cudatoolkit
-    sed -i 's/cpuonly/cudatoolkit=11.8/' "$MODIFIED_YML"
+    sed_inplace 's/cpuonly/cudatoolkit=11.8/' "$MODIFIED_YML"
     # TensorFlow: add GPU suffix if not present
-    sed -i 's/tensorflow=\([0-9.]*\)$/tensorflow-gpu=\1/' "$MODIFIED_YML"
+    sed_inplace 's/tensorflow=\([0-9.]*\)$/tensorflow-gpu=\1/' "$MODIFIED_YML"
 fi
 
 # GPU to CPU
 if [[ "$GPU_TO_CPU" == true ]]; then
     print_info "Applying: GPU to CPU conversion..."
     # PyTorch: remove cudatoolkit, add cpuonly
-    sed -i '/cudatoolkit/d' "$MODIFIED_YML"
-    sed -i '/^dependencies:/a\  - cpuonly' "$MODIFIED_YML"
+    sed_inplace '/cudatoolkit/d' "$MODIFIED_YML"
+    sed_inplace '/^dependencies:/a\  - cpuonly' "$MODIFIED_YML"
     # TensorFlow: remove GPU suffix
-    sed -i 's/tensorflow-gpu/tensorflow/' "$MODIFIED_YML"
+    sed_inplace 's/tensorflow-gpu/tensorflow/' "$MODIFIED_YML"
 fi
 
 # Remove packages
@@ -294,9 +299,9 @@ for pkg in "${REMOVE_PACKAGES[@]}"; do
     # Escape special regex characters in package name
     escaped_pkg=$(printf '%s\n' "$pkg" | sed 's/[.[\*^$]/\\&/g')
     # Remove from conda dependencies
-    sed -i "/^  - ${escaped_pkg}/d" "$MODIFIED_YML"
+    sed_inplace "/^  - ${escaped_pkg}/d" "$MODIFIED_YML"
     # Remove from pip dependencies
-    sed -i "/    - ${escaped_pkg}/d" "$MODIFIED_YML"
+    sed_inplace "/    - ${escaped_pkg}/d" "$MODIFIED_YML"
 done
 
 # Add packages
@@ -306,7 +311,7 @@ if [[ ${#ADD_PACKAGES[@]} -gt 0 ]]; then
         # Escape special characters for sed
         escaped_pkg=$(printf '%s\n' "$pkg" | sed 's/[\/&]/\\&/g')
         # Add to conda dependencies (after dependencies: line)
-        sed -i "/^dependencies:/a\\  - $escaped_pkg" "$MODIFIED_YML"
+        sed_inplace "/^dependencies:/a\\  - $escaped_pkg" "$MODIFIED_YML"
     done
 fi
 
