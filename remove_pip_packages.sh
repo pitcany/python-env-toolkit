@@ -68,7 +68,8 @@ remove_packages() {
     echo ""
 
     # Count packages
-    local count=$(echo "$packages" | wc -l)
+    local count
+    count=$(echo "$packages" | wc -l)
     echo -e "${YELLOW}Total packages to remove: $count${NC}"
     echo ""
 

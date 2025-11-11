@@ -24,7 +24,7 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
+# BLUE='\033[0;34m'  # Unused, reserved for future use
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
@@ -345,7 +345,8 @@ detect_conflicts() {
 
     for pkg in "${!package_channels[@]}"; do
         local channels="${package_channels[$pkg]}"
-        local channel_count=$(echo "$channels" | tr '|' '\n' | grep -v "^$" | sort -u | wc -l)
+        local channel_count
+        channel_count=$(echo "$channels" | tr '|' '\n' | grep -v "^$" | sort -u | wc -l)
 
         if [[ $channel_count -gt 1 ]]; then
             echo "  - $pkg: ${channels//|/ , }"
