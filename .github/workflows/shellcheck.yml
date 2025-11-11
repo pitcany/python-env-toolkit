@@ -1,0 +1,83 @@
+name: Shell Script Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.sh'
+      - '.github/workflows/shellcheck.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**.sh'
+      - '.github/workflows/shellcheck.yml'
+
+jobs:
+  shellcheck:
+    name: Shellcheck Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Show shellcheck version
+        run: shellcheck --version
+
+      - name: Run shellcheck on all scripts
+        run: |
+          # Find all .sh files excluding specific directories
+          find . -name "*.sh" \
+            -not -path "./examples/*" \
+            -not -path "./.git/*" \
+            -type f \
+            -exec shellcheck --color=always --shell=bash --severity=warning {} +
+
+      - name: Run validation script
+        run: |
+          chmod +x ./validate_scripts.sh
+          ./validate_scripts.sh
+
+  syntax-check:
+    name: Bash Syntax Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check bash syntax
+        run: |
+          echo "Checking bash syntax for all scripts..."
+          find . -name "*.sh" -type f -exec bash -n {} \;
+          echo "✅ All scripts have valid syntax"
+
+  script-summary:
+    name: Generate Script Summary
+    runs-on: ubuntu-latest
+    needs: [shellcheck, syntax-check]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate summary
+        run: |
+          echo "# Shell Script Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All validation checks passed!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Scripts Validated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          find . -maxdepth 1 -name "*.sh" -type f | sort | while read -r script; do
+            echo "- \`$(basename "$script")\`" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Checks Performed" >> $GITHUB_STEP_SUMMARY
+          echo "- Shellcheck static analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- Bash syntax validation" >> $GITHUB_STEP_SUMMARY

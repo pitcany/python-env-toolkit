@@ -111,6 +111,7 @@ See [examples/README.md](examples/README.md) for:
 | **export_env.sh** | Export environment specs | YAML + requirements.txt, cross-platform compatible |
 | **sync_env.sh** | Sync from YAML/requirements | Update packages, prune extras, maintain consistency |
 | **find_duplicates.sh** | Detect conda/pip conflicts | Find & fix packages installed in both |
+| **channel_manager.sh** | Manage conda channels | Add/remove/prioritize channels, detect conflicts |
 
 ### 🧹 Environment Maintenance
 
@@ -133,6 +134,13 @@ See [examples/README.md](examples/README.md) for:
 | Script | Purpose | Key Features |
 |--------|---------|--------------|
 | **health_check.sh** | Comprehensive diagnostics | GPU/CUDA check, conflicts, Jupyter status, health score |
+| **env_diff.sh** | Compare two environments | Show differences, version mismatches, sync commands |
+
+### 🛠️ Development & Validation
+
+| Script | Purpose | Key Features |
+|--------|---------|--------------|
+| **validate_scripts.sh** | Shellcheck validation | Validate all scripts, CI/CD integration, strict mode |
 
 ---
 
@@ -586,6 +594,78 @@ Passed: 17
 Warnings: 1
 Failed: 0
 ```
+
+### Comparing Environments
+
+Use `env_diff.sh` to compare two environments and identify differences:
+
+```bash
+# Compare two environments
+./env_diff.sh env1 env2
+
+# Show detailed version differences
+./env_diff.sh env1 env2 --detailed
+
+# Export diff report to file
+./env_diff.sh env1 env2 --export diff_report.txt
+
+# Show sync commands to make env2 match env1
+./env_diff.sh env1 env2 --sync
+
+# Combine options
+./env_diff.sh prod dev --detailed --sync --export
+```
+
+**What it shows:**
+- ✅ Packages only in environment 1
+- ✅ Packages only in environment 2
+- ✅ Version mismatches between common packages
+- ✅ Differences in both conda and pip packages
+- ✅ Summary statistics
+- ✅ Optional: Sync commands to reconcile differences
+
+**Perfect for:** Team synchronization, validating clones, debugging environment discrepancies, creating migration plans
+
+### Managing Conda Channels
+
+Use `channel_manager.sh` to manage conda channel priorities and configurations:
+
+```bash
+# List channels for current/global configuration
+./channel_manager.sh list
+
+# List channels for specific environment
+./channel_manager.sh list myenv
+
+# Add a channel globally
+./channel_manager.sh add conda-forge
+
+# Add channel to specific environment
+./channel_manager.sh add conda-forge myenv
+
+# Remove a channel
+./channel_manager.sh remove conda-forge
+
+# Set channel as highest priority
+./channel_manager.sh priority conda-forge myenv
+
+# Reset to default channels
+./channel_manager.sh reset
+./channel_manager.sh reset myenv
+
+# Detect channel conflicts in environment
+./channel_manager.sh detect-conflicts myenv
+```
+
+**What it does:**
+- ✅ List configured channels with priorities
+- ✅ Add/remove channels globally or per-environment
+- ✅ Change channel priorities (prepend to highest)
+- ✅ Reset to default channel configuration
+- ✅ Detect common channel conflicts (conda-forge + defaults mix)
+- ✅ Suggest optimal channel configurations
+
+**Perfect for:** Resolving package conflicts, managing channel priorities, team channel standards, debugging installation issues
 
 ---
 
