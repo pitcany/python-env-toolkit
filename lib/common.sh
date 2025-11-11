@@ -5,6 +5,30 @@
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Detect operating system
+detect_os() {
+    case "$OSTYPE" in
+        darwin*)  echo "macos" ;;
+        linux*)   echo "linux" ;;
+        *)        echo "unknown" ;;
+    esac
+}
+
+OS_TYPE=$(detect_os)
+
+# Cross-platform sed in-place editing
+# Usage: sed_inplace "pattern" "file"
+sed_inplace() {
+    local pattern=$1
+    local file=$2
+
+    if [[ "$OS_TYPE" == "macos" ]]; then
+        sed -i '' "$pattern" "$file"
+    else
+        sed -i "$pattern" "$file"
+    fi
+}
+
 # Load version info
 if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
     source "$SCRIPT_DIR/VERSION"
@@ -21,6 +45,7 @@ show_version() {
 ${TOOLKIT_NAME} v${TOOLKIT_VERSION}
 Released: ${TOOLKIT_DATE}
 Commit: ${TOOLKIT_COMMIT}
+Platform: ${OS_TYPE}
 EOF
 }
 

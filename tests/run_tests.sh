@@ -61,40 +61,41 @@ print_test_start() {
     if [[ "$VERBOSE" == true ]]; then
         echo -e "${YELLOW}▶ $1${NC}"
     else
-        echo -n "Testing $1... "
+        # Force flush with trailing space and explicit stdout sync
+        printf "Testing %s... " "$1"
     fi
 }
 
 print_test_pass() {
-    ((PASSED_TESTS++))
-    ((TOTAL_TESTS++))
+    PASSED_TESTS=$((PASSED_TESTS + 1))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
     if [[ "$VERBOSE" == true ]]; then
         echo -e "  ${GREEN}✓ PASS${NC}"
     else
-        echo -e "${GREEN}✓ PASS${NC}"
+        printf "${GREEN}✓ PASS${NC}\n"
     fi
 }
 
 print_test_fail() {
     local message=$1
-    ((FAILED_TESTS++))
-    ((TOTAL_TESTS++))
+    FAILED_TESTS=$((FAILED_TESTS + 1))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
     if [[ "$VERBOSE" == true ]]; then
         echo -e "  ${RED}✗ FAIL: $message${NC}"
     else
-        echo -e "${RED}✗ FAIL${NC}"
-        echo -e "  ${RED}$message${NC}"
+        printf "${RED}✗ FAIL${NC}\n"
+        printf "  ${RED}%s${NC}\n" "$message"
     fi
 }
 
 print_test_skip() {
     local reason=$1
-    ((SKIPPED_TESTS++))
-    ((TOTAL_TESTS++))
+    SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
     if [[ "$VERBOSE" == true ]]; then
         echo -e "  ${YELLOW}⊘ SKIP: $reason${NC}"
     else
-        echo -e "${YELLOW}⊘ SKIP${NC}"
+        printf "${YELLOW}⊘ SKIP${NC}\n"
     fi
 }
 
@@ -102,19 +103,30 @@ print_test_skip() {
 run_test_file() {
     local test_file=$1
     local test_name=$(basename "$test_file" .sh)
+    local temp_output
 
     print_test_start "$test_name"
 
     if [[ "$VERBOSE" == true ]]; then
-        if bash "$test_file"; then
+        if /usr/bin/env bash "$test_file"; then
             print_test_pass
         else
             print_test_fail "Test script failed"
         fi
     else
-        if output=$(bash "$test_file" 2>&1); then
+        # Capture output and run test
+        temp_output=$(mktemp)
+        set +e
+        "$test_file" >"$temp_output" 2>&1
+        local exit_code=$?
+        set -e
+        if [[ $exit_code -eq 0 ]]; then
+            rm -f "$temp_output"
             print_test_pass
         else
+            local output
+            output=$(cat "$temp_output" 2>/dev/null || echo "Test failed")
+            rm -f "$temp_output"
             print_test_fail "$output"
         fi
     fi
