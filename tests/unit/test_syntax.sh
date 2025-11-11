@@ -16,7 +16,7 @@ failed=0
 for script in "${scripts[@]}"; do
     if ! bash -n "$script" 2>/dev/null; then
         echo "FAIL: Syntax error in $script"
-        ((failed++))
+        failed=$((failed + 1))
     fi
 done
 

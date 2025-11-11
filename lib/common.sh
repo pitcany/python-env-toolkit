@@ -23,6 +23,45 @@ sed_inplace() {
     local file=$2
 
     if [[ "$OS_TYPE" == "macos" ]]; then
+        # BSD sed requires the appended text for a\ commands on separate lines.
+        # Detect simple append commands and rewrite them into the BSD-friendly form.
+        if [[ "$pattern" == /* && "$pattern" == */a\\* ]]; then
+            local before_append=${pattern%%a\\*}
+            local append_payload=${pattern#*a\\}
+            # Convert escaped \n sequences into real newlines for multi-line appends.
+            append_payload=${append_payload//\\n/$'\n'}
+
+            local append_lines=()
+            while IFS= read -r line; do
+                append_lines+=("$line")
+            done <<<"$append_payload"
+
+            if [[ "$append_payload" == *$'\n' ]]; then
+                if [[ ${#append_lines[@]} -gt 0 ]]; then
+                    local last_index=$(( ${#append_lines[@]} - 1 ))
+                    if [[ "${append_lines[$last_index]}" != "" ]]; then
+                        append_lines+=("")
+                    fi
+                else
+                    append_lines+=("")
+                fi
+            fi
+
+            # Ensure at least one line is provided to sed even if payload was empty.
+            if [[ ${#append_lines[@]} -eq 0 ]]; then
+                append_lines+=("")
+            fi
+
+            # BSD sed syntax: sed -i '' -e '/addr/a\' -e 'line1' -e 'line2'
+            local sed_args=("sed" "-i" "" "-e" "${before_append}a\\")
+            for line in "${append_lines[@]}"; do
+                sed_args+=("-e" "$line")
+            done
+            sed_args+=("$file")
+            "${sed_args[@]}"
+            return
+        fi
+
         sed -i '' "$pattern" "$file"
     else
         sed -i "$pattern" "$file"

@@ -25,19 +25,19 @@ failed=0
 # Test 1: Script runs with --help
 if ! ./env_diff.sh --help &>/dev/null; then
     echo "FAIL: env_diff.sh --help failed"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 # Test 2: Script fails properly with no arguments
 if ./env_diff.sh &>/dev/null; then
     echo "FAIL: env_diff.sh should fail with no arguments"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 # Test 3: Script fails properly with invalid environment
 if ./env_diff.sh nonexistent_env_12345 nonexistent_env_67890 &>/dev/null; then
     echo "FAIL: env_diff.sh should fail with invalid environments"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 if [[ $failed -eq 0 ]]; then

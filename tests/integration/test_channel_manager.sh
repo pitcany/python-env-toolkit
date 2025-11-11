@@ -25,19 +25,19 @@ failed=0
 # Test 1: Script runs with help
 if ! ./channel_manager.sh help &>/dev/null; then
     echo "FAIL: channel_manager.sh help failed"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 # Test 2: Script can list channels
 if ! ./channel_manager.sh list &>/dev/null; then
     echo "FAIL: channel_manager.sh list failed"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 # Test 3: Script fails with invalid command
 if ./channel_manager.sh invalid_command_xyz &>/dev/null; then
     echo "FAIL: channel_manager.sh should fail with invalid command"
-    ((failed++))
+    failed=$((failed + 1))
 fi
 
 if [[ $failed -eq 0 ]]; then
