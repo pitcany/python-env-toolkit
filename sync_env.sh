@@ -136,16 +136,16 @@ if [[ -n "${REQ_FILE}" ]] && [[ -f "${REQ_FILE}" ]]; then
         installed_packages=$(pip list --format=freeze | grep -v "^pip==" | grep -v "^setuptools==" | grep -v "^wheel==" | cut -d'=' -f1 | tr '[:upper:]' '[:lower:]' | tr '_' '-')
 
         # Find packages to remove
-        to_remove=""
+        to_remove=()
         for pkg in ${installed_packages}; do
             if ! echo "${required_packages}" | grep -q "^${pkg}$"; then
-                to_remove="${to_remove} ${pkg}"
+                to_remove+=("${pkg}")
             fi
         done
 
-        if [[ -n "${to_remove}" ]]; then
-            echo "Removing: ${to_remove}"
-            pip uninstall -y ${to_remove}
+        if [[ ${#to_remove[@]} -gt 0 ]]; then
+            echo "Removing: ${to_remove[*]}"
+            pip uninstall -y "${to_remove[@]}"
         else
             echo "No packages to prune"
         fi

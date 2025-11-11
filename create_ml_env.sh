@@ -251,25 +251,26 @@ echo ""
 print_info "Creating conda environment with Python $PYTHON_VERSION..."
 echo ""
 
-# Build conda command
-conda_cmd="conda create -n $ENV_NAME python=$PYTHON_VERSION"
+# Build conda command as array (safer than eval)
+conda_cmd=(conda create -n "$ENV_NAME" "python=$PYTHON_VERSION")
 
-# Add conda packages
-if [[ ${#conda_packages[@]} -gt 0 ]]; then
-    conda_cmd="$conda_cmd ${conda_packages[*]}"
-fi
-
-# Add channels if specified
+# Add channels if specified (must come before packages)
 if [[ ${#conda_channels[@]} -gt 0 ]]; then
     for channel in "${conda_channels[@]}"; do
-        conda_cmd="$conda_cmd -c $channel"
+        conda_cmd+=(-c "$channel")
     done
 fi
 
-conda_cmd="$conda_cmd -y"
+# Add conda packages
+if [[ ${#conda_packages[@]} -gt 0 ]]; then
+    conda_cmd+=("${conda_packages[@]}")
+fi
+
+# Add -y flag
+conda_cmd+=(-y)
 
 # Execute conda create
-if eval "$conda_cmd"; then
+if "${conda_cmd[@]}"; then
     echo ""
     print_success "Conda packages installed successfully!"
 else

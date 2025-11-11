@@ -101,7 +101,7 @@ for pkg in ${conda_packages}; do
         conda_version=$(conda list --name "${ENV_NAME}" | grep -i "^${pkg}" | head -1 | awk '{print $2}')
 
         if [[ -n "${TARGET_ENV}" ]]; then
-            pip_version=$(conda run --name "${ENV_ENV}" pip show "${pkg}" 2>/dev/null | grep "^Version:" | awk '{print $2}' || echo "unknown")
+            pip_version=$(conda run --name "${ENV_NAME}" pip show "${pkg}" 2>/dev/null | grep "^Version:" | awk '{print $2}' || echo "unknown")
         else
             pip_version=$(pip show "${pkg}" 2>/dev/null | grep "^Version:" | awk '{print $2}' || echo "unknown")
         fi

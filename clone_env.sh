@@ -176,7 +176,7 @@ echo ""
 
 # Export source environment to temporary file
 TEMP_YML=$(mktemp --suffix=.yml)
-trap "rm -f $TEMP_YML" EXIT
+trap 'rm -f "$TEMP_YML"' EXIT
 
 print_info "Exporting source environment..."
 conda env export -n "$SOURCE_ENV" --no-builds > "$TEMP_YML"
@@ -224,14 +224,14 @@ echo ""
 
 # Apply modifications to YAML
 MODIFIED_YML=$(mktemp --suffix=.yml)
-trap "rm -f $TEMP_YML $MODIFIED_YML" EXIT
+trap 'rm -f "$TEMP_YML" "$MODIFIED_YML"' EXIT
 
 cp "$TEMP_YML" "$MODIFIED_YML"
 
 # Change Python version
 if [[ -n "$PYTHON_VERSION" ]]; then
     print_info "Applying: Python version change..."
-    sed -i "s/^  - python=.*/  - python=$PYTHON_VERSION/" "$MODIFIED_YML"
+    sed -i "s|^  - python=.*|  - python=$PYTHON_VERSION|" "$MODIFIED_YML"
 fi
 
 # Swap frameworks
@@ -291,18 +291,22 @@ fi
 # Remove packages
 for pkg in "${REMOVE_PACKAGES[@]}"; do
     print_info "Applying: Remove $pkg..."
+    # Escape special regex characters in package name
+    escaped_pkg=$(printf '%s\n' "$pkg" | sed 's/[.[\*^$]/\\&/g')
     # Remove from conda dependencies
-    sed -i "/^  - ${pkg}/d" "$MODIFIED_YML"
+    sed -i "/^  - ${escaped_pkg}/d" "$MODIFIED_YML"
     # Remove from pip dependencies
-    sed -i "/    - ${pkg}/d" "$MODIFIED_YML"
+    sed -i "/    - ${escaped_pkg}/d" "$MODIFIED_YML"
 done
 
 # Add packages
 if [[ ${#ADD_PACKAGES[@]} -gt 0 ]]; then
     print_info "Applying: Add packages..."
     for pkg in "${ADD_PACKAGES[@]}"; do
+        # Escape special characters for sed
+        escaped_pkg=$(printf '%s\n' "$pkg" | sed 's/[\/&]/\\&/g')
         # Add to conda dependencies (after dependencies: line)
-        sed -i "/^dependencies:/a\  - $pkg" "$MODIFIED_YML"
+        sed -i "/^dependencies:/a\\  - $escaped_pkg" "$MODIFIED_YML"
     done
 fi
 
