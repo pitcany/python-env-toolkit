@@ -45,7 +45,13 @@ activate_env() {
 # Function to get pip packages
 get_pip_packages() {
     # Get all pip packages excluding essential ones
-    pip freeze | grep -v "^-e" | cut -d"=" -f1 | grep -v -E "^(pip|setuptools|wheel)$"
+    # Handle both standard (pkg==ver) and URL (pkg @ url) formats
+    pip freeze | \
+        grep -v "^-e" | \
+        sed 's/ @.*//' | \
+        sed 's/==.*//' | \
+        grep -v "^$" | \
+        grep -v -E "^(pip|setuptools|wheel)$"
 }
 
 # Function to remove packages
@@ -78,7 +84,7 @@ remove_packages() {
 
     # Remove packages
     echo -e "${GREEN}Removing packages...${NC}"
-    echo "$packages" | xargs pip uninstall -y
+    echo "$packages" | xargs -r pip uninstall -y
 
     echo -e "${GREEN}Successfully removed all pip packages!${NC}"
 }
