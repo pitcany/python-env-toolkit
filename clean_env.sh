@@ -48,7 +48,7 @@ if [[ -n "$pip_pkgs" ]]; then
   echo "$pip_pkgs" | sed 's/^/  - /'
   read -rp "Proceed with pip uninstalls? [y/N] " p
   if [[ "${p,,}" == "y" ]]; then
-    pip uninstall -y $pip_pkgs || true
+    echo "$pip_pkgs" | xargs -r pip uninstall -y || true
   else
     echo "⏩ Skipping pip uninstalls."
   fi

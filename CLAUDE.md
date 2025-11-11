@@ -71,6 +71,14 @@ The codebase follows a **flat, single-directory structure** with no subdirectori
 - `--fix` mode removes pip duplicates (keeps conda versions)
 - Works with active or named environments
 
+**channel_manager.sh** - Conda channel management utility
+- List configured channels with priority order
+- Add/remove channels globally or per-environment
+- Set channel priority (prepend to highest)
+- Reset to default channel configuration
+- Detect channel conflicts (conda-forge + defaults mix)
+- Suggest optimal channel configurations
+
 #### 🧹 Environment Maintenance
 
 **clean_env.sh** - Complete environment cleanup
@@ -123,6 +131,24 @@ The codebase follows a **flat, single-directory structure** with no subdirectori
 - ML framework version validation
 - Health score (0-100%) with pass/warning/fail counts
 - Quick mode (`--quick`) and GPU-only mode (`--gpu-only`)
+
+**env_diff.sh** - Compare two environments
+- Show packages unique to each environment
+- Highlight version mismatches for common packages
+- Compare both conda and pip packages
+- Export diff report to file
+- Generate sync commands to reconcile differences
+- Detailed and summary display modes
+- Useful for team synchronization and debugging discrepancies
+
+#### 🛠️ Development & Validation
+
+**validate_scripts.sh** - Shell script validation with shellcheck
+- Validates all shell scripts using shellcheck
+- Supports strict mode (treats warnings as errors)
+- Shows suggested fixes for issues
+- Integrates with CI/CD (GitHub Actions workflow included)
+- Helps maintain code quality and catch bugs early
 
 ## Common Commands
 

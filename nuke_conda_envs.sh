@@ -198,7 +198,7 @@ if [[ -n "$PIP_PACKAGES" ]]; then
     fi
     echo ""
     echo "🗑️  Removing pip packages from base..."
-    conda run -n base pip uninstall -y $PIP_PACKAGES || true
+    echo "$PIP_PACKAGES" | xargs -r conda run -n base pip uninstall -y || true
     echo -e "${GREEN}✅ Pip packages removed from base.${NC}"
 else
     echo -e "${GREEN}✅ No pip packages to remove from base.${NC}"

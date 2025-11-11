@@ -133,16 +133,16 @@ if [[ "$COMMAND" == "list" ]]; then
         exit 0
     fi
 
-    # Get list of conda environments
-    declare -A conda_envs
-    while IFS= read -r line; do
-        if [[ $line =~ ^#.* ]] || [[ -z $line ]]; then
-            continue
-        fi
-        env_name=$(echo "$line" | awk '{print $1}')
-        env_path=$(echo "$line" | awk '{print $NF}')
-        conda_envs["$env_path"]="$env_name"
-    done < <(conda env list)
+    # Get list of conda environments (for future use in orphan detection)
+    # declare -A conda_envs
+    # while IFS= read -r line; do
+    #     if [[ $line =~ ^#.* ]] || [[ -z $line ]]; then
+    #         continue
+    #     fi
+    #     env_name=$(echo "$line" | awk '{print $1}')
+    #     env_path=$(echo "$line" | awk '{print $NF}')
+    #     conda_envs["$env_path"]="$env_name"
+    # done < <(conda env list)
 
     # List all kernels
     kernel_count=0
