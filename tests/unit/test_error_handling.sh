@@ -11,7 +11,6 @@ echo "Testing error handling patterns..."
 # Find all shell scripts
 mapfile -t scripts < <(find . -maxdepth 1 -name "*.sh" -type f)
 
-failed=0
 checked=0
 
 for script in "${scripts[@]}"; do

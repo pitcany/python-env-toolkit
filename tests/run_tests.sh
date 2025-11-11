@@ -102,8 +102,10 @@ print_test_skip() {
 # Run a test file
 run_test_file() {
     local test_file=$1
-    local test_name=$(basename "$test_file" .sh)
+    local test_name
     local temp_output
+
+    test_name=$(basename "$test_file" .sh)
 
     print_test_start "$test_name"
 
