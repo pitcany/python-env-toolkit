@@ -935,7 +935,7 @@ prompt_user_decision() {
 
 verify_safe_install_available() {
     local script_dir
-    script_dir=$(dirname "$(readlink -f "$0")")
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local safe_install_path="${script_dir}/safe_install.sh"
 
     if [[ ! -f "$safe_install_path" ]]; then
