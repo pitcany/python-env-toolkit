@@ -1,14 +1,42 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------
-# clean_env_full.sh — Remove all packages except core ones (python, pip, setuptools, wheel)
+# clean_env.sh — Remove all packages except core ones (python, pip, setuptools, wheel)
 # Handles both Conda-managed and Pip-installed packages.
 #
 # Usage:
 #   conda activate myenv
-#   bash clean_env_full.sh
+#   ./clean_env.sh
+#
+# Options:
+#   --help, -h    Show this help message
 # ---------------------------------------------------------------------
 
 set -euo pipefail
+
+# Show help
+if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
+    grep "^#" "$0" | grep -v "^#!/" | sed 's/^# //' | sed 's/^#//'
+    exit 0
+fi
+
+# Check if conda is available
+if ! command -v conda &> /dev/null; then
+    echo "🚫 Error: conda command not found"
+    exit 1
+fi
+
+# Check if an environment is active
+if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
+    echo "🚫 Error: No conda environment active"
+    echo "Please activate an environment first: conda activate <env_name>"
+    exit 1
+fi
+
+if [[ "${CONDA_DEFAULT_ENV}" == "base" ]]; then
+    echo "🚫 Error: Cannot clean base environment"
+    echo "Please activate a non-base environment first"
+    exit 1
+fi
 
 echo "🧭 Active environment: $CONDA_DEFAULT_ENV"
 echo "📦 Cleaning packages... (Conda + Pip)"

@@ -180,7 +180,10 @@ print_info "Target: $NEW_ENV"
 echo ""
 
 # Export source environment to temporary file
-TEMP_YML=$(mktemp --suffix=.yml)
+# Use portable mktemp syntax (BSD mktemp doesn't support --suffix)
+TEMP_YML=$(mktemp)
+mv "$TEMP_YML" "${TEMP_YML}.yml"
+TEMP_YML="${TEMP_YML}.yml"
 trap 'rm -f "$TEMP_YML"' EXIT
 
 print_info "Exporting source environment..."
@@ -228,7 +231,10 @@ fi
 echo ""
 
 # Apply modifications to YAML
-MODIFIED_YML=$(mktemp --suffix=.yml)
+# Use portable mktemp syntax (BSD mktemp doesn't support --suffix)
+MODIFIED_YML=$(mktemp)
+mv "$MODIFIED_YML" "${MODIFIED_YML}.yml"
+MODIFIED_YML="${MODIFIED_YML}.yml"
 trap 'rm -f "$TEMP_YML" "$MODIFIED_YML"' EXIT
 
 cp "$TEMP_YML" "$MODIFIED_YML"

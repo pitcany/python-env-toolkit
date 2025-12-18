@@ -6,6 +6,16 @@
 
 set -euo pipefail
 
+# Signal handler for Ctrl+C - important for destructive operations
+cleanup() {
+    echo ""
+    echo -e "\033[1;33m⚠️  Operation interrupted by user\033[0m"
+    echo "Some environments may have already been removed."
+    echo "Check remaining environments with: conda env list"
+    exit 130
+}
+trap cleanup INT TERM
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

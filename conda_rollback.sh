@@ -4,7 +4,10 @@
 #
 # Usage:
 #   conda activate <env_name>
-#   bash conda_rollback.sh
+#   ./conda_rollback.sh
+#
+# Options:
+#   --help, -h    Show this help message
 #
 # Description:
 #   - Lists all revision snapshots for the active environment
@@ -13,6 +16,18 @@
 # ------------------------------------------------------------------
 
 set -euo pipefail
+
+# Show help
+if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
+    grep "^#" "$0" | grep -v "^#!/" | sed 's/^# //' | sed 's/^#//'
+    exit 0
+fi
+
+# Check if conda is available
+if ! command -v conda &> /dev/null; then
+    echo "🚫 Error: conda command not found"
+    exit 1
+fi
 
 # 🧭 Detect active environment
 if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then

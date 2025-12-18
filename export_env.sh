@@ -14,6 +14,12 @@
 
 set -euo pipefail
 
+# Check if conda is available
+if ! command -v conda &> /dev/null; then
+    echo "🚫 Error: conda command not found"
+    exit 1
+fi
+
 # Default output filenames
 YML_FILE="environment.yml"
 REQ_FILE="requirements.txt"

@@ -308,9 +308,10 @@ if [[ "$QUICK_MODE" == false ]]; then
 
     # Check for conda/pip duplicates
     duplicate_count=0
-    if [[ -f "/home/yannik/Work/tools/find_duplicates.sh" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -f "$SCRIPT_DIR/find_duplicates.sh" ]]; then
         # Run find_duplicates silently and count
-        duplicate_output=$(/home/yannik/Work/tools/find_duplicates.sh "$ENV_NAME" 2>/dev/null | grep "Found.*package" || echo "")
+        duplicate_output=$("$SCRIPT_DIR/find_duplicates.sh" "$ENV_NAME" 2>/dev/null | grep "Found.*package" || echo "")
         if [[ "$duplicate_output" =~ Found\ ([0-9]+)\ package ]]; then
             duplicate_count="${BASH_REMATCH[1]}"
         fi
