@@ -108,23 +108,23 @@ warnings=0
 # Validate each script
 for script in "${SCRIPTS[@]}"; do
     script_name=$(basename "$script")
-    ((total++))
+    total=$((total + 1))
 
     echo -n "Checking $script_name... "
 
     # Run shellcheck
     if output=$(shellcheck "${SHELLCHECK_OPTS[@]}" "$script" 2>&1); then
         echo -e "${GREEN}✓ PASS${NC}"
-        ((passed++))
+        passed=$((passed + 1))
     else
         # Check if warnings or errors
         if echo "$output" | grep -q "^In.*line.*:$"; then
             if [[ "$STRICT_MODE" == true ]] || echo "$output" | grep -q "error:"; then
                 echo -e "${RED}✗ FAIL${NC}"
-                ((failed++))
+                failed=$((failed + 1))
             else
                 echo -e "${YELLOW}⚠ WARNINGS${NC}"
-                ((warnings++))
+                warnings=$((warnings + 1))
             fi
 
             echo ""
@@ -132,7 +132,7 @@ for script in "${SCRIPTS[@]}"; do
             echo ""
         else
             echo -e "${GREEN}✓ PASS${NC}"
-            ((passed++))
+            passed=$((passed + 1))
         fi
     fi
 done
