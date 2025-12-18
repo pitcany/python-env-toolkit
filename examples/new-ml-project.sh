@@ -68,7 +68,7 @@ echo ""
 # Step 1: Gather information
 print_step "1" "Project Configuration"
 
-read -p "Project/Environment name: " PROJECT_NAME
+read -rp "Project/Environment name: " PROJECT_NAME
 
 if [[ -z "$PROJECT_NAME" ]]; then
     echo -e "${RED}Error: Project name is required${NC}"
@@ -91,7 +91,7 @@ echo "  5) data-science      - Pandas, NumPy, Scikit-learn, Matplotlib"
 echo "  6) nlp               - NLP stack with Transformers"
 echo "  7) cv                - Computer Vision stack"
 echo ""
-read -p "Select template (1-7): " TEMPLATE_CHOICE
+read -rp "Select template (1-7): " TEMPLATE_CHOICE
 
 case $TEMPLATE_CHOICE in
     1) TEMPLATE="pytorch-gpu" ;;
@@ -108,11 +108,11 @@ case $TEMPLATE_CHOICE in
 esac
 
 echo ""
-read -p "Python version (default: 3.10): " PYTHON_VERSION
+read -rp "Python version (default: 3.10): " PYTHON_VERSION
 PYTHON_VERSION=${PYTHON_VERSION:-3.10}
 
 echo ""
-read -p "Additional packages (comma-separated, or leave empty): " EXTRA_PACKAGES
+read -rp "Additional packages (comma-separated, or leave empty): " EXTRA_PACKAGES
 
 # Step 2: Create environment
 print_step "2" "Creating Environment"
@@ -140,6 +140,7 @@ if [[ -n "$EXTRA_PACKAGES" ]]; then
     echo ""
 
     # Activate environment and install
+    # shellcheck disable=SC2086  # Word splitting is intentional for package list
     if conda run -n "$PROJECT_NAME" "$SCRIPT_DIR/safe_install.sh" $PACKAGES --yes; then
         print_success "Additional packages installed!"
     else

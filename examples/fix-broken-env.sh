@@ -127,14 +127,13 @@ print_step "2" "Checking for Package Conflicts"
 echo -e "${CYAN}Scanning for packages installed via both conda and pip...${NC}"
 echo ""
 
-DUPLICATES_FOUND=0
-"$SCRIPT_DIR/find_duplicates.sh" "$TARGET_ENV" 2>&1 | tee /tmp/duplicates_output.txt || DUPLICATES_FOUND=$?
+"$SCRIPT_DIR/find_duplicates.sh" "$TARGET_ENV" 2>&1 | tee /tmp/duplicates_output.txt || true
 
 if grep -q "Found.*package" /tmp/duplicates_output.txt 2>/dev/null; then
     echo ""
     print_warning "Conflicts detected!"
     echo ""
-    read -p "Fix conflicts by removing pip duplicates? (y/N) " -n 1 -r
+    read -rp "Fix conflicts by removing pip duplicates? (y/N) " -n 1
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
@@ -164,7 +163,7 @@ if [[ $REVISION_COUNT -gt 1 ]]; then
     echo -e "${CYAN}Recent revisions:${NC}"
     conda list --revisions -n "$TARGET_ENV" | grep -A2 "^rev" | tail -20
     echo ""
-    read -p "Rollback to a previous revision? (y/N) " -n 1 -r
+    read -rp "Rollback to a previous revision? (y/N) " -n 1
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
@@ -193,14 +192,14 @@ echo "  1) Export and clean environment (nuclear option - removes all packages)"
 echo "  2) Re-run health check only"
 echo "  3) Exit (I'll fix it manually)"
 echo ""
-read -p "Select option (1-3): " REPAIR_OPTION
+read -rp "Select option (1-3): " REPAIR_OPTION
 
 case $REPAIR_OPTION in
     1)
         echo ""
         print_warning "This will export environment specs, then remove all packages"
         echo ""
-        read -p "Continue? (y/N) " -n 1 -r
+        read -rp "Continue? (y/N) " -n 1
         echo ""
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             # Export first

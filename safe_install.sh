@@ -21,6 +21,16 @@
 
 set -euo pipefail
 
+# Signal handler for Ctrl+C
+cleanup() {
+    echo ""
+    echo -e "\033[1;33m⚠️  Installation interrupted by user\033[0m"
+    echo "If packages were partially installed, you can rollback with:"
+    echo "  ./conda_rollback.sh"
+    exit 130
+}
+trap cleanup INT TERM
+
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'

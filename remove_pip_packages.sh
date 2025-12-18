@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Script to remove all pip-installed packages from a conda environment
 # Usage: ./remove_pip_packages.sh [conda_env_name] [--yes]
 
-set -e
+set -euo pipefail
 
 # Color codes for output
 RED='\033[0;31m'

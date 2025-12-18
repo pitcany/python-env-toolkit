@@ -317,10 +317,11 @@ if [[ "$REGISTER_KERNEL" == true ]]; then
 fi
 
 # Run health check if available
-if [[ -f "/home/yannik/Work/tools/health_check.sh" ]]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/health_check.sh" ]]; then
     print_header "Running Health Check"
     echo ""
-    /home/yannik/Work/tools/health_check.sh "$ENV_NAME" --quick || true
+    "$SCRIPT_DIR/health_check.sh" "$ENV_NAME" --quick || true
     echo ""
 fi
 
