@@ -12,6 +12,7 @@
 #   --conda-only           Only check conda packages
 #   --pip-only             Only check pip packages
 #   --batch                Show all updates first, then batch approval
+#   --quick                Skip dependency checking (much faster)
 #   --check-duplicates     Run find_duplicates.sh before starting
 #   --health-check-after   Run health_check.sh after updates
 #   --export-after         Export environment after updates
@@ -43,6 +44,7 @@ VERBOSITY="default"  # default, summary, verbose
 TARGET_ENV=""
 CONDA_ONLY=false
 PIP_ONLY=false
+QUICK_MODE=false
 CHECK_DUPLICATES=false
 HEALTH_CHECK_AFTER=false
 EXPORT_AFTER=false
@@ -119,6 +121,10 @@ parse_arguments() {
             --batch)
                 # Reserved for future batch mode implementation
                 echo "⚠️  Warning: --batch mode not yet implemented"
+                shift
+                ;;
+            --quick)
+                QUICK_MODE=true
                 shift
                 ;;
             --check-duplicates)
@@ -641,29 +647,33 @@ assess_package_risk() {
     risk=$(calculate_base_risk "$version_change")
     local risk_factors=("Version: $version_change")
 
-    # Step 2: Check dependency impact
-    local dep_info
-    if [[ "$pkg_manager" == "conda" ]]; then
-        dep_info=$(check_conda_dependencies "$package" "$latest_version" "$env_name")
-    else
-        dep_info=$(check_pip_dependencies "$package" "$latest_version" "$env_name")
-    fi
+    # Step 2: Check dependency impact (skip in quick mode - this is slow)
+    local dep_count=0
+    local dep_packages=""
+    if [[ "$QUICK_MODE" != true ]]; then
+        local dep_info
+        if [[ "$pkg_manager" == "conda" ]]; then
+            dep_info=$(check_conda_dependencies "$package" "$latest_version" "$env_name")
+        else
+            dep_info=$(check_pip_dependencies "$package" "$latest_version" "$env_name")
+        fi
 
-    IFS='|' read -r dep_count dep_packages <<< "$dep_info"
+        IFS='|' read -r dep_count dep_packages <<< "$dep_info"
 
-    if [[ $dep_count -gt 0 ]]; then
-        risk_factors+=("Dependencies: $dep_count affected")
+        if [[ $dep_count -gt 0 ]]; then
+            risk_factors+=("Dependencies: $dep_count affected")
 
-        if [[ $dep_count -ge 4 ]]; then
-            risk=$(elevate_risk "$risk" 2)
-        elif [[ $dep_count -ge 1 ]]; then
-            risk=$(elevate_risk "$risk" 1)
+            if [[ $dep_count -ge 4 ]]; then
+                risk=$(elevate_risk "$risk" 2)
+            elif [[ $dep_count -ge 1 ]]; then
+                risk=$(elevate_risk "$risk" 1)
+            fi
         fi
     fi
 
-    # Step 3: Check for security fixes (pip packages only)
+    # Step 3: Check for security fixes (pip packages only, skip in quick mode)
     local security_info="false|unknown|"
-    if [[ "$pkg_manager" == "pip" ]]; then
+    if [[ "$QUICK_MODE" != true ]] && [[ "$pkg_manager" == "pip" ]]; then
         security_info=$(check_pypi_security "$package" "$latest_version")
         IFS='|' read -r has_security release_type _ <<< "$security_info"
 
@@ -687,45 +697,23 @@ get_conda_updates() {
 
     echo "🔍 Checking conda packages..." >&2
 
-    # Check if jq is installed
-    if ! command -v jq &> /dev/null; then
-        echo "⚠️  Warning: jq not installed, falling back to text parsing" >&2
-        local outdated_output
-        if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
-            outdated_output=$(conda list --outdated 2>/dev/null || echo "")
-        else
-            outdated_output=$(conda list -n "$env_name" --outdated 2>/dev/null || echo "")
-        fi
-
-        # Check if command failed
-        if [[ -z "$outdated_output" ]]; then
-            echo "⚠️  Warning: Could not list conda packages" >&2
-            return 1
-        fi
-
-        # Parse text format: skip header lines, format as "conda|package|current|latest"
-        echo "$outdated_output" | tail -n +4 | awk '{if (NF >= 4) print "conda|" $1 "|" $2 "|" $NF}'
-        return
-    fi
-
-    # Use JSON output for reliable parsing
-    local json_output
+    # Use conda list --outdated (FAST - single command for all packages)
+    local outdated_output
     if [[ "$env_name" == "$CONDA_DEFAULT_ENV" ]]; then
-        json_output=$(conda list --json 2>/dev/null)
+        outdated_output=$(conda list --outdated 2>/dev/null || echo "")
     else
-        json_output=$(conda list -n "$env_name" --json 2>/dev/null)
+        outdated_output=$(conda list -n "$env_name" --outdated 2>/dev/null || echo "")
     fi
 
-    # Validate JSON output
-    if [[ -z "$json_output" ]] || ! echo "$json_output" | jq empty 2>/dev/null; then
-        echo "⚠️  Warning: Could not retrieve conda package list" >&2
+    # Check if command failed
+    if [[ -z "$outdated_output" ]]; then
+        echo "⚠️  Warning: Could not list outdated conda packages" >&2
         return 1
     fi
 
-    # Parse and check each package for updates
-    echo "$json_output" | jq -r '.[] | select(.channel != "pypi") | .name' 2>/dev/null | while read -r package; do
-        [[ -n "$package" ]] && check_conda_package_update "$package" "$env_name"
-    done
+    # Parse text format: skip header lines, format as "conda|package|current|latest"
+    # Format: Name  Version  Build  Channel  Latest
+    echo "$outdated_output" | tail -n +4 | awk '{if (NF >= 4) print "conda|" $1 "|" $2 "|" $NF}'
 }
 
 check_conda_package_update() {
