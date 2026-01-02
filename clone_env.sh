@@ -377,7 +377,7 @@ if conda env create -n "$NEW_ENV" -f "$MODIFIED_YML"; then
     echo ""
 
     # Show package count
-    pkg_count=$(conda list -n "$NEW_ENV" | grep -v "^#" | wc -l)
+    pkg_count=$(conda list -n "$NEW_ENV" | grep -vc "^#")
     print_info "Total packages: $pkg_count"
     echo ""
 else

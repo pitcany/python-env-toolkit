@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Purpose:** Python Environment Management Toolkit
 **Language:** Bash Shell Scripts
 
-This repository contains standalone utility scripts for managing Python development environments, specifically focusing on Conda and Poetry package management workflows. Each script is self-contained and executable, designed to solve specific environment management tasks.
+This repository contains standalone utility scripts for managing Python development environments, from initial Conda installation through daily package management workflows. It focuses on Conda and Poetry package management, with each script being self-contained and executable, designed to solve specific environment management tasks.
 
 ## Architecture & Code Organization
 
@@ -17,6 +17,15 @@ The codebase follows a **flat, single-directory structure** with no subdirectori
 ### Key Scripts
 
 #### 🚀 Environment Creation & Setup
+
+**install_conda.sh** - Download and install latest Miniconda or Miniforge
+- Auto-detects platform (Linux/macOS) and architecture (x86_64/ARM64)
+- Installs latest stable Miniforge (recommended) or Miniconda
+- Verifies SHA256 checksums for security (Miniforge)
+- Optional shell initialization with `conda init`
+- Custom installation path support
+- Unattended mode for CI/CD workflows
+- Interactive choice between distributions with detailed comparisons
 
 **create_ml_env.sh** - Quick ML environment creation from templates
 - 11 pre-configured templates (pytorch-cpu/gpu, tensorflow-cpu/gpu, jax, data-science, nlp, cv, etc.)
@@ -174,6 +183,21 @@ conda activate myenv
 
 ### Common Workflows
 
+**Bootstrap fresh system (install Conda):**
+```bash
+# Interactive installation (recommended)
+./install_conda.sh
+
+# Install Miniconda instead of Miniforge
+./install_conda.sh --miniconda
+
+# CI/CD mode (non-interactive)
+./install_conda.sh --unattended --path ~/miniconda3
+
+# Custom path without shell initialization
+./install_conda.sh --path /opt/conda --no-init
+```
+
 **Create new ML environment:**
 ```bash
 # From template
@@ -281,7 +305,7 @@ All scripts use `set -euo pipefail` for strict error handling (exit on error, tr
 ## Important Notes
 
 ### Dependencies
-- **Conda/Miniconda** - Required for all scripts except Poetry-specific ones
+- **Conda/Miniconda** - Required for all scripts except Poetry-specific ones (use `install_conda.sh` to install)
 - **Poetry** - Required only for poetry_bind_conda.sh and clean_poetry_env.sh
 - **Jupyter** - Required only for manage_jupyter_kernels.sh
 - **NVIDIA drivers/CUDA** - Optional, for GPU-enabled features and templates

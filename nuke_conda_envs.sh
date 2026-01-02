@@ -82,7 +82,7 @@ conda env list
 echo ""
 
 # Count environments (excluding base)
-ENV_COUNT=$(conda env list | grep -v '^#' | grep -v '^\s*$' | grep -v 'base' | wc -l)
+ENV_COUNT=$(conda env list | grep -v '^#' | grep -v '^\s*$' | grep -vc 'base')
 
 if [[ $ENV_COUNT -eq 0 ]]; then
     echo -e "${YELLOW}⚠️  No non-base environments found.${NC}"

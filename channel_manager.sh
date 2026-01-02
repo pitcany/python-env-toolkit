@@ -109,7 +109,7 @@ list_channels() {
     echo "─────────────────────────────────────────"
 
     echo "$channels" | grep -A 100 "channels:" | grep "^  -" | while read -r line; do
-        channel=$(echo "$line" | sed 's/^  - //')
+        channel="${line#  - }"
         printf "${GREEN}%8d${NC}  %s\n" "$priority" "$channel"
         ((priority++))
     done
@@ -314,7 +314,9 @@ detect_conflicts() {
     channels_used=$(echo "$packages_with_channels" | cut -d'|' -f2 | sort -u)
 
     echo "Channels in use:"
-    echo "$channels_used" | sed 's/^/  - /'
+    while IFS= read -r line; do
+        echo "  - $line"
+    done <<< "$channels_used"
     echo ""
 
     # Check for common conflict patterns

@@ -51,7 +51,9 @@ conda_pkgs=$(conda list --export \
 
 if [[ -n "$conda_pkgs" ]]; then
   echo "🧹 Conda packages to remove:"
-  echo "$conda_pkgs" | sed 's/^/  - /'
+  while IFS= read -r line; do
+    echo "  - $line"
+  done <<< "$conda_pkgs"
   read -rp "Proceed with conda removals? [y/N] " c
   if [[ "${c,,}" == "y" ]]; then
     echo "$conda_pkgs" | xargs -r conda remove -y || true
@@ -73,7 +75,9 @@ pip_pkgs=$(pip list --format=freeze \
 
 if [[ -n "$pip_pkgs" ]]; then
   echo "🧹 Pip packages to uninstall:"
-  echo "$pip_pkgs" | sed 's/^/  - /'
+  while IFS= read -r line; do
+    echo "  - $line"
+  done <<< "$pip_pkgs"
   read -rp "Proceed with pip uninstalls? [y/N] " p
   if [[ "${p,,}" == "y" ]]; then
     echo "$pip_pkgs" | xargs -r pip uninstall -y || true

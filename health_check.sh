@@ -399,8 +399,8 @@ if [[ "$QUICK_MODE" == false ]]; then
     print_section "Package Statistics"
     echo ""
 
-    conda_pkg_count=$(conda list -n "$ENV_NAME" --no-pip 2>/dev/null | grep -v "^#" | wc -l)
-    pip_pkg_count=$(conda list -n "$ENV_NAME" --export 2>/dev/null | grep "# pip" | wc -l || echo "0")
+    conda_pkg_count=$(conda list -n "$ENV_NAME" --no-pip 2>/dev/null | grep -vc "^#")
+    pip_pkg_count=$(conda list -n "$ENV_NAME" --export 2>/dev/null | grep -c "# pip" || echo "0")
 
     print_info "Conda packages: $conda_pkg_count"
     print_info "Pip packages: $pip_pkg_count"

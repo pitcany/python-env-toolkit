@@ -124,8 +124,8 @@ printf "%-30s %-20s %-20s\n" "-------" "-------------" "-----------"
 
 for info in "${duplicate_info[@]}"; do
     IFS='|' read -r pkg conda_ver pip_ver <<< "${info}"
-    conda_ver_clean=$(echo "${conda_ver}" | sed 's/conda://')
-    pip_ver_clean=$(echo "${pip_ver}" | sed 's/pip://')
+    conda_ver_clean="${conda_ver#conda:}"
+    pip_ver_clean="${pip_ver#pip:}"
     printf "%-30s %-20s %-20s\n" "${pkg}" "${conda_ver_clean}" "${pip_ver_clean}"
 done
 

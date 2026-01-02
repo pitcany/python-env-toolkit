@@ -340,7 +340,7 @@ fi
 
 echo ""
 print_info "Package counts:"
-pkg_count=$(conda list -n "$ENV_NAME" | grep -v "^#" | wc -l)
+pkg_count=$(conda list -n "$ENV_NAME" | grep -vc "^#")
 echo "  Total packages: $pkg_count"
 echo ""
 
