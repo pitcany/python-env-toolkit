@@ -18,6 +18,7 @@
 #   --export-after         Export environment after updates
 #   --refresh              Clear cache and refresh data
 #   --yes                  Non-interactive mode (for testing)
+#   --debug-timing         Show timing information for performance analysis
 #
 # Examples:
 #   ./smart_update.sh
@@ -50,6 +51,11 @@ HEALTH_CHECK_AFTER=false
 EXPORT_AFTER=false
 REFRESH_CACHE=false
 NON_INTERACTIVE=false
+DEBUG_TIMING=false
+
+# Timing tracking
+TIMING_START=0
+TIMING_LAST=0
 
 # Cache directory
 CACHE_DIR=""
@@ -93,6 +99,27 @@ test_version_parsing() {
     done
 
     exit 0
+}
+
+log_timing() {
+    if [[ "$DEBUG_TIMING" != true ]]; then
+        return
+    fi
+
+    local phase_name=$1
+    local current_time
+    current_time=$(date +%s)
+
+    if [[ $TIMING_START -eq 0 ]]; then
+        TIMING_START=$current_time
+        TIMING_LAST=$current_time
+        echo "⏱️  [TIMING] Start: $phase_name" >&2
+    else
+        local elapsed=$((current_time - TIMING_LAST))
+        local total=$((current_time - TIMING_START))
+        echo "⏱️  [TIMING] $phase_name: ${elapsed}s (total: ${total}s)" >&2
+        TIMING_LAST=$current_time
+    fi
 }
 
 parse_arguments() {
@@ -145,6 +172,10 @@ parse_arguments() {
                 ;;
             --yes)
                 NON_INTERACTIVE=true
+                shift
+                ;;
+            --debug-timing)
+                DEBUG_TIMING=true
                 shift
                 ;;
             --test)
@@ -469,6 +500,14 @@ check_pip_dependencies() {
     local new_version=$2
     local env_name=$3
 
+    # Check cache first
+    local cache_file
+    cache_file=$(get_cache_file "$package" "pip_deps")
+    if is_cache_valid "$cache_file"; then
+        cat "$cache_file"
+        return
+    fi
+
     # For pip, we can use --dry-run (though it's less reliable)
     local pip_cmd="pip"
     local env_python=""
@@ -495,7 +534,77 @@ check_pip_dependencies() {
         affected_count=$(echo "$deps_output" | tr ',' '\n' | grep -c . || echo 0)
     fi
 
-    echo "$affected_count|${affected_packages[*]}"
+    local result="$affected_count|${affected_packages[*]}"
+    echo "$result" > "$cache_file" 2>/dev/null || true
+    echo "$result"
+}
+
+# Prefetch pip dependency info for multiple packages
+# Uses a single batch pip show call instead of N calls
+prefetch_pip_deps() {
+    local env_name=$1
+    shift
+    local packages=("$@")
+
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    echo "📦 Pre-fetching pip dependency info..." >&2
+
+    # Determine pip command
+    local pip_cmd="pip"
+    if [[ "$env_name" != "$CONDA_DEFAULT_ENV" ]]; then
+        local env_path
+        env_path=$(conda env list | grep "^${env_name} " | awk '{print $NF}')
+        if [[ -n "$env_path" ]] && [[ -f "${env_path}/bin/pip" ]]; then
+            pip_cmd="${env_path}/bin/pip"
+        fi
+    fi
+
+    # Batch call: pip show pkg1 pkg2 pkg3 ... (much faster than N calls)
+    local batch_output
+    batch_output=$($pip_cmd show "${packages[@]}" 2>/dev/null || echo "")
+
+    if [[ -z "$batch_output" ]]; then
+        return 1
+    fi
+
+    # Parse batch output - pip show outputs blocks separated by "---"
+    local current_pkg=""
+    local current_deps=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^Name:\ (.+)$ ]]; then
+            # Save previous package if exists
+            if [[ -n "$current_pkg" ]]; then
+                local cache_file
+                cache_file=$(get_cache_file "$current_pkg" "pip_deps")
+                local dep_count=0
+                if [[ -n "$current_deps" ]] && [[ "$current_deps" != "Requires:" ]]; then
+                    dep_count=$(echo "$current_deps" | sed 's/Requires: //' | tr ',' '\n' | grep -c . || echo 0)
+                fi
+                echo "${dep_count}|" > "$cache_file" 2>/dev/null || true
+            fi
+            current_pkg="${BASH_REMATCH[1]}"
+            current_deps=""
+        elif [[ "$line" =~ ^Requires:(.*)$ ]]; then
+            current_deps="$line"
+        fi
+    done <<< "$batch_output"
+
+    # Save last package
+    if [[ -n "$current_pkg" ]]; then
+        local cache_file
+        cache_file=$(get_cache_file "$current_pkg" "pip_deps")
+        local dep_count=0
+        if [[ -n "$current_deps" ]] && [[ "$current_deps" != "Requires:" ]]; then
+            dep_count=$(echo "$current_deps" | sed 's/Requires: //' | tr ',' '\n' | grep -c . || echo 0)
+        fi
+        echo "${dep_count}|" > "$cache_file" 2>/dev/null || true
+    fi
+
+    echo "   ✅ Pip dependency prefetch complete" >&2
 }
 
 query_pypi_api() {
@@ -651,12 +760,14 @@ assess_package_risk() {
     local dep_count=0
     local dep_packages=""
     if [[ "$QUICK_MODE" != true ]]; then
+        log_timing "  → Dependency check: $package ($pkg_manager)"
         local dep_info
         if [[ "$pkg_manager" == "conda" ]]; then
             dep_info=$(check_conda_dependencies "$package" "$latest_version" "$env_name")
         else
             dep_info=$(check_pip_dependencies "$package" "$latest_version" "$env_name")
         fi
+        log_timing "  → Dependency check complete: $package"
 
         IFS='|' read -r dep_count dep_packages <<< "$dep_info"
 
@@ -674,7 +785,9 @@ assess_package_risk() {
     # Step 3: Check for security fixes (pip packages only, skip in quick mode)
     local security_info="false|unknown|"
     if [[ "$QUICK_MODE" != true ]] && [[ "$pkg_manager" == "pip" ]]; then
+        log_timing "  → Security check: $package"
         security_info=$(check_pypi_security "$package" "$latest_version")
+        log_timing "  → Security check complete: $package"
         IFS='|' read -r has_security release_type _ <<< "$security_info"
 
         if [[ "$has_security" == "true" ]]; then
@@ -812,6 +925,72 @@ get_pip_updates() {
 
     # Parse JSON output with error handling
     echo "$outdated_output" | jq -r '.[] | "pip|\(.name)|\(.version)|\(.latest_version)"' 2>/dev/null
+}
+
+# Prefetch PyPI data for multiple packages in parallel
+# This dramatically speeds up the risk assessment phase
+prefetch_pypi_data() {
+    local packages=("$@")
+    local max_parallel=10
+
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    echo "🌐 Pre-fetching PyPI data for ${#packages[@]} packages..." >&2
+
+    # Check if we have the tools needed
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+        return 1
+    fi
+
+    local pids=()
+    local count=0
+
+    for package in "${packages[@]}"; do
+        local cache_file
+        cache_file=$(get_cache_file "$package" "pypi")
+
+        # Skip if already cached
+        if is_cache_valid "$cache_file"; then
+            continue
+        fi
+
+        # Fetch in background
+        (
+            local pypi_url="https://pypi.org/pypi/${package}/json"
+            local response=""
+
+            if command -v curl &> /dev/null; then
+                response=$(curl -s -f --max-time 5 --connect-timeout 3 "$pypi_url" 2>/dev/null || echo "")
+            elif command -v wget &> /dev/null; then
+                response=$(wget -qO- --timeout=5 --tries=1 "$pypi_url" 2>/dev/null || echo "")
+            fi
+
+            # Only cache valid responses
+            if [[ -n "$response" ]] && echo "$response" | grep -q "{"; then
+                echo "$response" > "$cache_file" 2>/dev/null
+            fi
+        ) &
+
+        pids+=($!)
+        count=$((count + 1))
+
+        # Limit parallelism
+        if [[ $count -ge $max_parallel ]]; then
+            # Wait for at least one to finish
+            wait -n 2>/dev/null || wait "${pids[0]}"
+            pids=("${pids[@]:1}")
+            count=$((count - 1))
+        fi
+    done
+
+    # Wait for all remaining background jobs
+    for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+
+    echo "   ✅ PyPI data prefetch complete" >&2
 }
 
 format_update_display() {
@@ -1082,18 +1261,23 @@ execute_approved_updates() {
 main() {
     parse_arguments "$@"
 
+    log_timing "Script start"
+
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "🚀 Smart Update - Intelligent Package Updater"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
     # Pre-flight checks
+    log_timing "Pre-flight checks start"
     check_required_tools
     check_internet_connectivity || true  # Continue even if no internet
     echo ""
+    log_timing "Pre-flight checks complete"
 
     detect_environment
     initialize_cache
+    log_timing "Environment detection complete"
 
     # Check for safe_install.sh
     local use_safe_install=true
@@ -1124,6 +1308,7 @@ main() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
+    log_timing "Conda updates scan start"
     if [[ "$PIP_ONLY" != true ]]; then
         if ! while IFS='|' read -r pkg_manager package current latest; do
             [[ -n "$package" ]] && updates+=("$pkg_manager|$package|$current|$latest")
@@ -1132,7 +1317,9 @@ main() {
             echo "⚠️  Warning: Failed to retrieve all conda updates" >&2
         fi
     fi
+    log_timing "Conda updates scan complete"
 
+    log_timing "Pip updates scan start"
     if [[ "$CONDA_ONLY" != true ]]; then
         if ! while IFS='|' read -r pkg_manager package current latest; do
             [[ -n "$package" ]] && updates+=("$pkg_manager|$package|$current|$latest")
@@ -1141,6 +1328,7 @@ main() {
             echo "⚠️  Warning: Failed to retrieve all pip updates" >&2
         fi
     fi
+    log_timing "Pip updates scan complete"
 
     # Check if any updates available
     if [[ ${#updates[@]} -eq 0 ]]; then
@@ -1161,12 +1349,37 @@ main() {
     echo "📊 Found ${#updates[@]} package(s) with updates available"
     echo ""
 
+    # Pre-fetch data in parallel for pip packages (skip in quick mode)
+    log_timing "Prefetch phase start"
+    if [[ "$QUICK_MODE" != true ]] && [[ "$CONDA_ONLY" != true ]]; then
+        local pip_packages=()
+        for update in "${updates[@]}"; do
+            IFS='|' read -r pkg_manager package _ _ <<< "$update"
+            if [[ "$pkg_manager" == "pip" ]]; then
+                pip_packages+=("$package")
+            fi
+        done
+        if [[ ${#pip_packages[@]} -gt 0 ]]; then
+            # Batch fetch pip dependency info (single pip show call vs N calls)
+            prefetch_pip_deps "$ENV_NAME" "${pip_packages[@]}"
+            # Parallel fetch PyPI API data (10 concurrent requests)
+            prefetch_pypi_data "${pip_packages[@]}"
+            echo ""
+        fi
+    fi
+    log_timing "Prefetch phase complete"
+
     # Interactive approval workflow
     local approved_updates=()
     local skipped_updates=()
 
+    log_timing "Risk assessment phase start"
+    local package_count=0
     for update in "${updates[@]}"; do
         IFS='|' read -r pkg_manager package current latest <<< "$update"
+
+        ((package_count++))
+        log_timing "Assessing package $package_count/${#updates[@]}: $package"
 
         # Assess risk for this package
         local risk_assessment
@@ -1215,6 +1428,8 @@ main() {
                 ;;
         esac
     done
+
+    log_timing "Risk assessment phase complete"
 
     # Summary
     echo ""
